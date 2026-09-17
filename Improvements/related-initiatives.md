@@ -3,19 +3,33 @@
 A GitHub/web survey (2026-09-17) for prior art combining buzz's chat-native,
 signed-event, multi-human-multi-agent model with kirocrew-style agent
 capability/memory/orchestration depth. No project directly forks or merges
-buzz and kirocrew specifically, but one effort is a clear parallel — and
-arguably already validates the direction sketched in
-[`buzz-to-kirocrew.md`](./buzz-to-kirocrew.md): standardizing agent
-identity/capability/memory as signed Nostr event kinds, the same substrate
-buzz itself is built on.
+buzz and kirocrew specifically. The closest hit found (Quorum, below) turned
+out on inspection to be a thin, unverified, zero-traction repo — its README
+overclaims relative to its actual signals (see caveat under Quorum) — so
+treat this whole section as "the same idea occurred to someone else," not
+"someone has proven this out."
 
 ---
 
 ## Quorum ([superirale/Quorum](https://github.com/superirale/Quorum), MIT)
 
+> **Caveat, checked after initial write-up:** on closer look this repo reads
+> as thin and self-reported rather than proven. Signals: 0 stars/forks, ~32
+> commits total, yet its own README claims all 11 milestones complete, "823
+> tests" across six suites, a working Go relay + TypeScript SDK + web
+> console — a large maturity claim resting on essentially zero external
+> validation or community traction. No screenshots or UI were evident on
+> inspection despite the README describing one. That gap between claimed
+> completeness and observable signal is itself the tell — likely a
+> solo/AI-scaffolded spec-and-boilerplate project, not a working system on
+> par with either buzz or kirocrew. Read the rest of this section as "one
+> person had a similar idea and wrote a spec for it," not "this validates
+> the direction."
+
 "An agent-first messaging protocol built on Nostr: agents hold their own
 keys, carry scoped capabilities, ask humans for signed consent, and account
-for what they cost." Reference relay + client + agent SDK.
+for what they cost." Reference relay + client + agent SDK (per its own
+README — unverified beyond that).
 
 Its own framing is close to the buzz↔kirocrew comparison: *"Slack and its
 clones are human-first systems with bots bolted on — a bot is a webhook with
@@ -93,9 +107,12 @@ and a Solidity security-tooling `quorum` — none relevant here.
 
 ---
 
-**Bottom line:** nobody has published a direct buzz+kirocrew merge. The
-closest real prior art is Quorum + its NIP-XX draft, which independently
-arrived at "agent memory and capability should be signed Nostr event kinds"
-— the same bet buzz already made, pursued from the opposite direction (a
-minimal protocol/SDK rather than a full chat platform with desktop/mobile/
-web clients, persona packs, and a workflow engine already built on top).
+**Bottom line:** nobody has published a proven, working buzz+kirocrew merge.
+The closest thing found is a *proposal*, not a proof: the NIP-XX draft (and
+the Quorum repo backing it, itself unverified — see caveat above) argues
+"agent memory and capability should be signed Nostr event kinds," which is
+the same bet buzz already made and actually shipped, with a full chat
+platform, desktop/mobile/web clients, persona packs, and a workflow engine
+on top. Buzz is materially further along than anything this search
+surfaced — this section documents that someone else had a similar thought,
+not that they got there first or better.
