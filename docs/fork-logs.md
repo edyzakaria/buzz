@@ -4,6 +4,13 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-18 — Adopted the name "Buzziro" for this fork in docs/conversation
+  only (no code, crate, binary, or package rename). Added standing subagents
+  `.claude/agents/buzziro-dev.md` and `buzziro-tester.md`, mirroring the
+  `issue-management` project's `andy.md`/`rose.md` safety pattern (hard rules
+  against `docker compose down/up/restart`, `rm -rf`, and destructive git ops
+  without explicit per-task authorization), to replace ad-hoc general-purpose
+  subagent dispatch for implementation/verification work going forward.
 - 2026-09-18 — Bootstrapped fork-specific project docs (`docs/fork-overview.md`,
   this file) via the `init-project` template, named to avoid ambiguity with
   buzz's existing upstream `docs/` convention.
