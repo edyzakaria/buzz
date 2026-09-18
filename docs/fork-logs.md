@@ -4,6 +4,14 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-18 — Session end: attempted to dispatch `buzziro-dev` for Phase 0.1
+  (HMAC audit chain) but the running session's agent registry doesn't yet
+  recognize `buzziro-dev`/`buzziro-tester`. Diagnosed against
+  `issue-management`'s own `20260811-Andy_and_Rose_issue.md` precedent: our
+  frontmatter is structurally correct (unlike their original missing-
+  `description` bug), so this is purely a session-freshness issue — their
+  own history confirms custom agents only become invokable in a genuinely
+  fresh session. Phase 0.1 has not started; pick up there next session.
 - 2026-09-18 — Adopted the name "Buzziro" for this fork in docs/conversation
   only (no code, crate, binary, or package rename). Added standing subagents
   `.claude/agents/buzziro-dev.md` and `buzziro-tester.md`, mirroring the
