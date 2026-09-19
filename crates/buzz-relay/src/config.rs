@@ -22,9 +22,8 @@ pub const DEFAULT_MAX_FRAME_BYTES: usize = 512 * 1024;
 /// verifiable across relay restarts in local dev/test environments, even when
 /// the operator hasn't configured a persistent secret.
 const DEV_INSECURE_DEFAULT_HMAC_KEY: &[u8] = &[
-    0x44, 0xd3, 0xd6, 0x28, 0xe4, 0xad, 0x44, 0x18, 0xa6, 0x52, 0xcd, 0x19, 0x10, 0xc2, 0x49,
-    0x5b, 0x04, 0x20, 0xf8, 0x8a, 0xfe, 0x2c, 0x0e, 0xa5, 0x73, 0xcf, 0x58, 0xf1, 0x7c, 0x81,
-    0x99, 0x70,
+    0x44, 0xd3, 0xd6, 0x28, 0xe4, 0xad, 0x44, 0x18, 0xa6, 0x52, 0xcd, 0x19, 0x10, 0xc2, 0x49, 0x5b,
+    0x04, 0x20, 0xf8, 0x8a, 0xfe, 0x2c, 0x0e, 0xa5, 0x73, 0xcf, 0x58, 0xf1, 0x7c, 0x81, 0x99, 0x70,
 ];
 
 /// Errors that can occur while loading relay configuration.
@@ -1039,9 +1038,7 @@ impl Config {
         let audit_enabled = parse_bool("BUZZ_AUDIT_ENABLED", true)?;
         let audit_hmac_secret: Vec<u8> = match std::env::var("BUZZ_AUDIT_HMAC_SECRET") {
             Ok(raw) => hex::decode(&raw).map_err(|_| {
-                ConfigError::InvalidValue(
-                    "BUZZ_AUDIT_HMAC_SECRET must be valid hex".to_string(),
-                )
+                ConfigError::InvalidValue("BUZZ_AUDIT_HMAC_SECRET must be valid hex".to_string())
             })?,
             Err(std::env::VarError::NotPresent) => {
                 // Use fixed dev-only key when not configured (dev mode).

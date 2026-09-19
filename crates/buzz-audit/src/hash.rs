@@ -48,8 +48,7 @@ pub fn to_storage_precision(created_at: DateTime<Utc>) -> DateTime<Utc> {
 /// separately (e.g., in relay configuration) and never derivable from the chain
 /// itself.
 pub fn compute_hash(entry: &AuditEntry, key: &[u8]) -> Result<[u8; 32], AuditError> {
-    let mut hasher = HmacSha256::new_from_slice(key)
-        .map_err(|_| AuditError::InvalidHmacKey)?;
+    let mut hasher = HmacSha256::new_from_slice(key).map_err(|_| AuditError::InvalidHmacKey)?;
     // Tenant binding: community_id leads the hash.
     hasher.update(entry.community_id.as_bytes());
     hasher.update(&entry.seq.to_be_bytes());
@@ -78,7 +77,12 @@ pub fn compute_hash(entry: &AuditEntry, key: &[u8]) -> Result<[u8; 32], AuditErr
         Some(h) => hasher.update(h),
         None => hasher.update(&GENESIS_HASH),
     }
-    Ok(hasher.finalize().into_bytes().as_slice().try_into().unwrap())
+    Ok(hasher
+        .finalize()
+        .into_bytes()
+        .as_slice()
+        .try_into()
+        .unwrap())
 }
 
 /// Serialize a JSON value with sorted object keys for deterministic output.
@@ -167,7 +171,10 @@ mod tests {
     fn deterministic() {
         let entry = sample_entry();
         let key = test_key();
-        assert_eq!(compute_hash(&entry, &key).unwrap(), compute_hash(&entry, &key).unwrap());
+        assert_eq!(
+            compute_hash(&entry, &key).unwrap(),
+            compute_hash(&entry, &key).unwrap()
+        );
         assert_eq!(compute_hash(&entry, &key).unwrap().len(), 32);
     }
 
@@ -238,7 +245,10 @@ mod tests {
         let a = sample_entry();
         let mut b = a.clone();
         b.community_id = Uuid::from_u128(2);
-        assert_ne!(compute_hash(&a, &key).unwrap(), compute_hash(&b, &key).unwrap());
+        assert_ne!(
+            compute_hash(&a, &key).unwrap(),
+            compute_hash(&b, &key).unwrap()
+        );
     }
 
     #[test]
@@ -280,7 +290,10 @@ mod tests {
         none.actor_pubkey = None;
         let mut empty = sample_entry();
         empty.actor_pubkey = Some(Vec::new());
-        assert_ne!(compute_hash(&none, &key).unwrap(), compute_hash(&empty, &key).unwrap());
+        assert_ne!(
+            compute_hash(&none, &key).unwrap(),
+            compute_hash(&empty, &key).unwrap()
+        );
     }
 
     #[test]
