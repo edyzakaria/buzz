@@ -4,6 +4,22 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-18 — **Phase 0.1 complete: HMAC-keyed audit chain.** Swapped
+  `compute_hash` from unkeyed SHA-256 to HMAC-SHA256 with relay-held key
+  (loaded from `BUZZ_AUDIT_HMAC_SECRET` env, falls back to fixed dev-only key if unset).
+  The key lives in relay config, never in the chain itself; read access to the
+  log alone no longer permits forging a valid continuation. Field order and hash
+  construction are unchanged — only the digest becomes keyed. **Migration:**
+  this is pre-launch work with no production chain; existing local dev/test
+  chain history remains valid under the old construction since no real audits
+  yet exist. The relay enforces the keyed construction from day one (Phase 1
+  go-live) — no fallback, no rotation logic needed yet. All unit tests pass,
+  including a new regression test proving hash mismatches when using the wrong
+  key (`hmac_key_is_required_for_hash_verification`). Relay can be started
+  with `BUZZ_AUDIT_HMAC_SECRET=<hex-key>` (32+ bytes, hex-encoded) or will use
+  a fixed dev-only key when unset — do not use in production without setting BUZZ_AUDIT_HMAC_SECRET.
+  Updated `crates/buzz-audit/src/hash.rs`, `crates/buzz-relay/src/config.rs`, and threaded the key through 4 relay
+  codepaths (main.rs, state.rs, router.rs, workflow_sink.rs).
 - 2026-09-18 — Session end: attempted to dispatch `buzziro-dev` for Phase 0.1
   (HMAC audit chain) but the running session's agent registry doesn't yet
   recognize `buzziro-dev`/`buzziro-tester`. Diagnosed against

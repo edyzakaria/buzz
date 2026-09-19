@@ -1,8 +1,11 @@
 use chrono::{DateTime, SubsecRound, Utc};
-use sha2::{Digest, Sha256};
+use hmac::{Hmac, KeyInit, Mac};
+use sha2::Sha256;
 
 use crate::entry::AuditEntry;
 use crate::error::AuditError;
+
+type HmacSha256 = Hmac<Sha256>;
 
 /// The 32-byte sentinel hashed in place of `prev_hash` for a community's first
 /// entry. Stored as `prev_hash = NULL`; hashed as all-zero bytes.
@@ -23,7 +26,7 @@ pub fn to_storage_precision(created_at: DateTime<Utc>) -> DateTime<Utc> {
     created_at.trunc_subsecs(6)
 }
 
-/// SHA-256 over the entry's identity, chain, and context fields.
+/// HMAC-SHA256 over the entry's identity, chain, and context fields.
 ///
 /// Field order is fixed — changing it invalidates all existing chains. The
 /// `community_id` is hashed first so chain identity carries the tenant: an entry
@@ -39,11 +42,17 @@ pub fn to_storage_precision(created_at: DateTime<Utc>) -> DateTime<Utc> {
 /// `detail` is serialized via [`canonical_json`] (sorted keys) so the hash is
 /// stable across machines and Rust versions. A serialization failure is a hard
 /// error, never silently hashed as empty.
-pub fn compute_hash(entry: &AuditEntry) -> Result<[u8; 32], AuditError> {
-    let mut hasher = Sha256::new();
+///
+/// The `key` is used as the HMAC secret — read access to the log alone does not
+/// permit forging a valid continuation of the chain. The key must be stored
+/// separately (e.g., in relay configuration) and never derivable from the chain
+/// itself.
+pub fn compute_hash(entry: &AuditEntry, key: &[u8]) -> Result<[u8; 32], AuditError> {
+    let mut hasher = HmacSha256::new_from_slice(key)
+        .map_err(|_| AuditError::InvalidHmacKey)?;
     // Tenant binding: community_id leads the hash.
     hasher.update(entry.community_id.as_bytes());
-    hasher.update(entry.seq.to_be_bytes());
+    hasher.update(&entry.seq.to_be_bytes());
     hasher.update(
         to_storage_precision(entry.created_at)
             .to_rfc3339()
@@ -52,24 +61,24 @@ pub fn compute_hash(entry: &AuditEntry) -> Result<[u8; 32], AuditError> {
     hasher.update(entry.action.as_str().as_bytes());
     match &entry.actor_pubkey {
         Some(pk) => {
-            hasher.update([1u8]); // presence tag — distinguishes Some(empty) from None
+            hasher.update(&[1u8]); // presence tag — distinguishes Some(empty) from None
             hasher.update(pk);
         }
-        None => hasher.update([0u8]),
+        None => hasher.update(&[0u8]),
     }
     match &entry.object_id {
         Some(id) => {
-            hasher.update([1u8]);
+            hasher.update(&[1u8]);
             hasher.update(id.as_bytes());
         }
-        None => hasher.update([0u8]),
+        None => hasher.update(&[0u8]),
     }
     hasher.update(canonical_json(&entry.detail)?.as_bytes());
     match &entry.prev_hash {
         Some(h) => hasher.update(h),
-        None => hasher.update(GENESIS_HASH),
+        None => hasher.update(&GENESIS_HASH),
     }
-    Ok(hasher.finalize().into())
+    Ok(hasher.finalize().into_bytes().as_slice().try_into().unwrap())
 }
 
 /// Serialize a JSON value with sorted object keys for deterministic output.
@@ -122,6 +131,11 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
+    /// Test HMAC key used consistently across all tests.
+    fn test_key() -> Vec<u8> {
+        vec![0x42; 32]
+    }
+
     fn sample_entry() -> AuditEntry {
         AuditEntry {
             community_id: Uuid::from_u128(1),
@@ -152,8 +166,9 @@ mod tests {
     #[test]
     fn deterministic() {
         let entry = sample_entry();
-        assert_eq!(compute_hash(&entry).unwrap(), compute_hash(&entry).unwrap());
-        assert_eq!(compute_hash(&entry).unwrap().len(), 32);
+        let key = test_key();
+        assert_eq!(compute_hash(&entry, &key).unwrap(), compute_hash(&entry, &key).unwrap());
+        assert_eq!(compute_hash(&entry, &key).unwrap().len(), 32);
     }
 
     #[test]
@@ -186,6 +201,7 @@ mod tests {
         // The enforcement point: even handed an untruncated `created_at`,
         // `compute_hash` digests the storage-precision value, so a write path
         // that forgot to truncate cannot split the write/read preimage.
+        let key = test_key();
         let ns = nanosecond_instant();
         let mut written = sample_entry();
         written.created_at = ns;
@@ -193,8 +209,8 @@ mod tests {
         read_back.created_at = after_database_round_trip(ns);
 
         assert_eq!(
-            compute_hash(&written).unwrap(),
-            compute_hash(&read_back).unwrap()
+            compute_hash(&written, &key).unwrap(),
+            compute_hash(&read_back, &key).unwrap()
         );
     }
 
@@ -202,14 +218,15 @@ mod tests {
     fn storage_precision_timestamps_survive_a_database_round_trip() {
         // The invariant the write path must hold: hash what will be stored, so
         // recomputing from the row reproduces the digest.
+        let key = test_key();
         let mut written = sample_entry();
         written.created_at = to_storage_precision(nanosecond_instant());
         let mut read_back = written.clone();
         read_back.created_at = after_database_round_trip(read_back.created_at);
 
         assert_eq!(
-            compute_hash(&written).unwrap(),
-            compute_hash(&read_back).unwrap()
+            compute_hash(&written, &key).unwrap(),
+            compute_hash(&read_back, &key).unwrap()
         );
     }
 
@@ -217,50 +234,53 @@ mod tests {
     fn community_id_is_part_of_identity() {
         // The whole point: the same logical entry in two communities hashes
         // differently, so a row can't be replayed across chains.
+        let key = test_key();
         let a = sample_entry();
         let mut b = a.clone();
         b.community_id = Uuid::from_u128(2);
-        assert_ne!(compute_hash(&a).unwrap(), compute_hash(&b).unwrap());
+        assert_ne!(compute_hash(&a, &key).unwrap(), compute_hash(&b, &key).unwrap());
     }
 
     #[test]
     fn sensitive_to_each_field() {
+        let key = test_key();
         let base = sample_entry();
-        let h0 = compute_hash(&base).unwrap();
+        let h0 = compute_hash(&base, &key).unwrap();
 
         let mut e = base.clone();
         e.seq = 2;
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
 
         let mut e = base.clone();
         e.action = AuditAction::EventDeleted;
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
 
         let mut e = base.clone();
         e.actor_pubkey = Some(vec![0xcd; 32]);
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
 
         let mut e = base.clone();
         e.object_id = Some("different".into());
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
 
         let mut e = base.clone();
         e.detail = serde_json::json!({"key": "value"});
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
 
         let mut e = base.clone();
         e.prev_hash = Some(vec![0xff; 32]);
-        assert_ne!(h0, compute_hash(&e).unwrap());
+        assert_ne!(h0, compute_hash(&e, &key).unwrap());
     }
 
     #[test]
     fn presence_tag_distinguishes_none_from_empty() {
         // Some(empty) must not collide with None — the presence tag prevents it.
+        let key = test_key();
         let mut none = sample_entry();
         none.actor_pubkey = None;
         let mut empty = sample_entry();
         empty.actor_pubkey = Some(Vec::new());
-        assert_ne!(compute_hash(&none).unwrap(), compute_hash(&empty).unwrap());
+        assert_ne!(compute_hash(&none, &key).unwrap(), compute_hash(&empty, &key).unwrap());
     }
 
     #[test]
@@ -268,5 +288,25 @@ mod tests {
         let a = serde_json::json!({"z": 1, "a": 2, "m": 3});
         let b = serde_json::json!({"a": 2, "m": 3, "z": 1});
         assert_eq!(canonical_json(&a).unwrap(), canonical_json(&b).unwrap());
+    }
+
+    #[test]
+    fn hmac_key_is_required_for_hash_verification() {
+        // The critical security property: an entry hashed with one key cannot
+        // verify as valid when checked against a different key. This prevents
+        // anyone with read-only access to the log from forging valid continuations.
+        let entry = sample_entry();
+        let correct_key = test_key();
+        let wrong_key = vec![0xff; 32]; // Different key
+
+        let correct_hash = compute_hash(&entry, &correct_key).unwrap();
+        let wrong_hash = compute_hash(&entry, &wrong_key).unwrap();
+
+        // The two hashes must be completely different — using the wrong key
+        // does not produce a valid extension of the chain.
+        assert_ne!(
+            correct_hash, wrong_hash,
+            "hash computed with wrong key must not match hash computed with correct key"
+        );
     }
 }

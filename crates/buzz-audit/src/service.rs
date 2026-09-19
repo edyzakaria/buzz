@@ -35,14 +35,26 @@ const AUDIT_LOCK_NAMESPACE: &str = "buzz_audit:";
 /// for one community are serialized by a per-community advisory lock so the chain
 /// stays consistent across relay processes; different communities proceed in
 /// parallel.
+///
+/// The HMAC key is relay-held and never derivable from the chain itself,
+/// preventing unauthorized continuation of an audit log given only read access.
 pub struct AuditService {
     pool: PgPool,
+    /// HMAC-SHA256 secret key for hash chain validation. Stored in relay config,
+    /// never in the chain itself.
+    hmac_key: Vec<u8>,
 }
 
 impl AuditService {
-    /// Creates a new `AuditService` using the given connection pool.
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    /// Creates a new `AuditService` using the given connection pool and HMAC key.
+    ///
+    /// # Arguments
+    /// * `pool` - Database connection pool for the audit log storage
+    /// * `hmac_key` - Secret key used for HMAC-SHA256 hash chain construction.
+    ///   Must be at least 32 bytes and stored securely (e.g., in relay config
+    ///   from environment, never hardcoded or stored in the chain).
+    pub fn new(pool: PgPool, hmac_key: Vec<u8>) -> Self {
+        Self { pool, hmac_key }
     }
 
     /// Append a new entry to the calling community's chain.
@@ -128,7 +140,7 @@ impl AuditService {
             created_at,
         };
 
-        audit_entry.hash = compute_hash(&audit_entry)?.to_vec();
+        audit_entry.hash = compute_hash(&audit_entry, &self.hmac_key)?.to_vec();
 
         debug!(seq, "writing audit entry");
 
@@ -203,7 +215,7 @@ impl AuditService {
                 }
             }
 
-            let computed = compute_hash(&entry)?;
+            let computed = compute_hash(&entry, &self.hmac_key)?;
             if computed.as_slice() != entry.hash.as_slice() {
                 return Err(AuditError::HashMismatch { seq: entry.seq });
             }
@@ -291,6 +303,11 @@ mod postgres_tests {
         PgPool::connect(&url).await.ok()
     }
 
+    /// Generate a test HMAC key. Uses a fixed value for deterministic testing.
+    fn test_hmac_key() -> Vec<u8> {
+        vec![0x42; 32]
+    }
+
     /// Runs without Postgres, so a regression here is caught by `just
     /// test-unit` rather than only by the `#[ignore]` chain tests below.
     #[test]
@@ -335,7 +352,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let c = make_community(&pool).await;
 
         let e = svc
@@ -355,7 +372,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let c = make_community(&pool).await;
 
         let e1 = svc
@@ -393,7 +410,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let a = make_community(&pool).await;
         let b = make_community(&pool).await;
 
@@ -454,7 +471,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let c = make_community(&pool).await;
 
         svc.log(new_entry(c, AuditAction::EventCreated))
@@ -492,7 +509,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let a = make_community(&pool).await;
         let b = make_community(&pool).await;
 
@@ -529,7 +546,7 @@ mod postgres_tests {
         let Some(pool) = test_pool().await else {
             return;
         };
-        let svc = AuditService::new(pool.clone());
+        let svc = AuditService::new(pool.clone(), test_hmac_key());
         let c = make_community(&pool).await;
         // No entries for this fresh community.
         assert!(!svc

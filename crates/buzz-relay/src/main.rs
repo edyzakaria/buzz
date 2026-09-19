@@ -442,7 +442,7 @@ async fn run_relay_main(boot: BootTracker) -> anyhow::Result<()> {
             .await
             .map_err(|e| anyhow::anyhow!("Audit DB connection failed: {e}"))?;
         info!("Audit service ready");
-        Some(AuditService::new(audit_pool))
+        Some(AuditService::new(audit_pool, config.audit_hmac_secret.clone()))
     } else {
         info!("Audit logging disabled by BUZZ_AUDIT_ENABLED");
         None
