@@ -1543,7 +1543,7 @@ pub(crate) mod tests {
             .await
             .expect("hold community audit lock");
 
-        let audit = Arc::new(AuditService::new(audit_pool));
+        let audit = Arc::new(AuditService::new(audit_pool, vec![0x42; 32]));
         let worker = tokio::spawn({
             let audit = Arc::clone(&audit);
             async move { log_audit_entry(&audit, entry).await }
