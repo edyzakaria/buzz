@@ -684,7 +684,7 @@ mod tests {
                 .await
                 .expect("pubsub manager"),
         );
-        let audit = buzz_audit::AuditService::new(pool.clone());
+        let audit = buzz_audit::AuditService::new(pool.clone(), config.audit_hmac_secret.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
@@ -722,7 +722,7 @@ mod tests {
                 .await
                 .expect("pubsub manager"),
         );
-        let audit = buzz_audit::AuditService::new(pool.clone());
+        let audit = buzz_audit::AuditService::new(pool.clone(), config.audit_hmac_secret.clone());
         let auth = buzz_auth::AuthService::new(config.auth.clone());
         let search = buzz_search::SearchService::new(pool.clone());
         let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(

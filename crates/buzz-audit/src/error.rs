@@ -35,6 +35,10 @@ pub enum AuditError {
     #[error("unknown audit action in database")]
     UnknownAction,
 
+    /// The HMAC key is invalid (e.g., wrong length or type).
+    #[error("invalid HMAC key")]
+    InvalidHmacKey,
+
     /// A JSON serialization error occurred (e.g. while canonicalising `detail`).
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

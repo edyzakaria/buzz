@@ -2301,7 +2301,7 @@ mod tests {
                 .await;
 
             // Read each chain back through the operator-internal API.
-            let svc = AuditService::new(pool.clone());
+            let svc = AuditService::new(pool.clone(), vec![0x42; 32]);
             let a_rows = svc
                 .get_entries(CommunityId::from_uuid(*a_id), 1, 1000)
                 .await
@@ -2391,7 +2391,7 @@ mod tests {
                     .await
                     .expect("pubsub manager"),
             );
-            let audit = buzz_audit::AuditService::new(pool.clone());
+            let audit = buzz_audit::AuditService::new(pool.clone(), vec![0x42; 32]);
             let auth = buzz_auth::AuthService::new(config.auth.clone());
             let search = buzz_search::SearchService::new(pool.clone());
             let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(
@@ -2444,7 +2444,7 @@ mod tests {
                     .await
                     .ok()?,
             );
-            let audit = buzz_audit::AuditService::new(pool.clone());
+            let audit = buzz_audit::AuditService::new(pool.clone(), vec![0x42; 32]);
             let auth = buzz_auth::AuthService::new(config.auth.clone());
             let search = buzz_search::SearchService::new(pool.clone());
             let workflow_engine = Arc::new(buzz_workflow::WorkflowEngine::new(

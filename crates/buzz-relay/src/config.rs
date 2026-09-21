@@ -13,6 +13,19 @@ use tracing::warn;
 /// NIP-44 encryption overhead.
 pub const DEFAULT_MAX_FRAME_BYTES: usize = 512 * 1024;
 
+/// Fixed HMAC secret for audit chain hashing in development mode.
+///
+/// INSECURE — dev-only fallback when `BUZZ_AUDIT_HMAC_SECRET` is not set.
+/// Must NEVER be used in production. The relay will fall back to this key
+/// only when the environment variable is absent; setting `BUZZ_AUDIT_HMAC_SECRET`
+/// always takes precedence. This fixed key ensures that audit entries remain
+/// verifiable across relay restarts in local dev/test environments, even when
+/// the operator hasn't configured a persistent secret.
+const DEV_INSECURE_DEFAULT_HMAC_KEY: &[u8] = &[
+    0x44, 0xd3, 0xd6, 0x28, 0xe4, 0xad, 0x44, 0x18, 0xa6, 0x52, 0xcd, 0x19, 0x10, 0xc2, 0x49, 0x5b,
+    0x04, 0x20, 0xf8, 0x8a, 0xfe, 0x2c, 0x0e, 0xa5, 0x73, 0xcf, 0x58, 0xf1, 0x7c, 0x81, 0x99, 0x70,
+];
+
 /// Errors that can occur while loading relay configuration.
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -303,6 +316,12 @@ pub struct Config {
     /// This does not control the separate `moderation_actions` audit trail.
     /// Set `BUZZ_AUDIT_ENABLED=false` for deployments that do not require it.
     pub audit_enabled: bool,
+
+    /// HMAC secret key for audit chain hash construction.
+    /// Relay-held secret never stored in the chain itself.
+    /// Set via `BUZZ_AUDIT_HMAC_SECRET` as a hex-encoded 32+ byte key.
+    /// Falls back to a fixed dev-only key when unset — do not use in production without setting BUZZ_AUDIT_HMAC_SECRET.
+    pub audit_hmac_secret: Vec<u8>,
 
     /// Optional override for ephemeral channel TTL (in seconds).
     /// When set, any channel created with a TTL tag will use this value instead
@@ -1017,6 +1036,22 @@ impl Config {
         let privacy_markdown = read_policy_markdown("BUZZ_PRIVACY_POLICY_MARKDOWN")?;
         let age_attestation_required = parse_optional_bool("BUZZ_AGE_ATTESTATION_REQUIRED")?;
         let audit_enabled = parse_bool("BUZZ_AUDIT_ENABLED", true)?;
+        let audit_hmac_secret: Vec<u8> = match std::env::var("BUZZ_AUDIT_HMAC_SECRET") {
+            Ok(raw) => hex::decode(&raw).map_err(|_| {
+                ConfigError::InvalidValue("BUZZ_AUDIT_HMAC_SECRET must be valid hex".to_string())
+            })?,
+            Err(std::env::VarError::NotPresent) => {
+                // Use fixed dev-only key when not configured (dev mode).
+                // This ensures audit entries remain verifiable across relay restarts
+                // in local environments. NEVER use in production.
+                DEV_INSECURE_DEFAULT_HMAC_KEY.to_vec()
+            }
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err(ConfigError::InvalidValue(
+                    "BUZZ_AUDIT_HMAC_SECRET must be valid Unicode".to_string(),
+                ))
+            }
+        };
         let join_policy = if terms_markdown.is_none()
             && privacy_markdown.is_none()
             && !age_attestation_required
@@ -1239,6 +1274,7 @@ impl Config {
             media_max_concurrent_uploads_per_pubkey,
             media_uploads_per_minute,
             audit_enabled,
+            audit_hmac_secret,
             ephemeral_ttl_override,
             git_repo_path,
             git_pack_cache_path,

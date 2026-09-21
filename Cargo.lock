@@ -973,6 +973,7 @@ dependencies = [
  "chrono",
  "futures-util",
  "hex",
+ "hmac 0.13.0",
  "metrics",
  "serde",
  "serde_json",
