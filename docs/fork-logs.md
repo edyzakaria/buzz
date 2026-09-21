@@ -4,6 +4,24 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-21 — Phase 0.2 decided: buzz-dev-mcp's shell/file/search tools are
+  reachable only by a small trusted team, so full OS-level sandboxing (Linux
+  namespaces/Seatbelt) is deferred — documented, not silently skipped, per
+  the exit criteria in `Implementation/implementation.md`.
+- 2026-09-21 — Phase 1 go-live: built and deployed our own relay image
+  (`buzziro:cc22167f`, tag = merge commit of PR #1) in place of the removed
+  `buzz-prod` stack. Relay on `ws://192.168.0.186:3003` (moved off 3001/3000
+  — both taken by other host containers), Postgres/Redis/MinIO on fresh
+  volumes, real `BUZZ_AUDIT_HMAC_SECRET` generated for `.env` (never the
+  Phase 0.1 dev-only fallback key). Audit service confirmed live in relay
+  logs (`audit_enabled: true`, `"Audit service ready"`). Hit a real external
+  blocker along the way: Docker Hub now blocks anonymous pulls of
+  `minio/minio`/`minio/mc` — the repo's own `deploy/compose/compose.yml` had
+  already fixed this (digest-pinned `quay.io/minio/*` mirrors, dated before
+  this session) but the separately-maintained deployed copy at
+  `/home/blade/docker/buzz/deploy/compose/` was stale and needed
+  re-syncing from the repo.
+
 - 2026-09-18 — **Phase 0.1 complete: HMAC-keyed audit chain.** Swapped
   `compute_hash` from unkeyed SHA-256 to HMAC-SHA256 with relay-held key
   (loaded from `BUZZ_AUDIT_HMAC_SECRET` env, falls back to fixed dev-only key if unset).
