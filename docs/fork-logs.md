@@ -10,7 +10,8 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
   `bana.persona.md`). Zero code, as scoped — the harness still has no
   tool-level allow/deny mechanism to enforce this (verified prior session);
   the enforced version stays tracked under Phase 3's 7c-hard, bundled with
-  5b.
+  5b. User flagged Phase 2.1 may need revisiting later (no specifics given
+  yet) — don't treat it as closed.
 
 - 2026-09-21 — Phase 0.2 decided: buzz-dev-mcp's shell/file/search tools are
   reachable only by a small trusted team, so full OS-level sandboxing (Linux
