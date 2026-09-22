@@ -76,6 +76,9 @@ dirs = "6"
 # WebSocket client — ephemeral event publish (kind:20001 is WS-only on the relay)
 buzz-ws-client = { path = "../buzz-ws-client" }
 
+# ISM HTTP client — fetch issues for discussion
+buzz-ism = { workspace = true }
+
 # Explicit rustls dep with ring provider — required to install the process-level
 # CryptoProvider at startup. Without this the standalone `buzz` binary panics when
 # a multi-package release build (buzz-acp + buzz-dev-mcp + buzz-cli in one cargo

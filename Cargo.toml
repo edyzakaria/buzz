@@ -20,6 +20,7 @@ members = [
     "crates/buzz-workflow",
     "crates/buzz-media",
     "crates/buzz-cli",
+    "crates/buzz-ism",
     "crates/buzz-pairing-cli",
     "crates/buzz-sdk",
     "crates/buzz-persona",
@@ -145,6 +146,7 @@ buzz-auth = { path = "crates/buzz-auth" }
 buzz-pubsub = { path = "crates/buzz-pubsub" }
 buzz-search = { path = "crates/buzz-search" }
 buzz-audit = { path = "crates/buzz-audit" }
+buzz-ism = { path = "crates/buzz-ism" }
 buzz-workflow = { path = "crates/buzz-workflow" }
 buzz-media = { path = "crates/buzz-media" }
 buzz-sdk = { path = "crates/buzz-sdk" }

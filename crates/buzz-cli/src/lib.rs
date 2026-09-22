@@ -234,6 +234,9 @@ enum Cmd {
     /// List, open, and manage direct messages
     #[command(subcommand)]
     Dms(DmsCmd),
+    /// Fetch an ISM ticket and discuss it in a channel
+    #[command(subcommand)]
+    Discuss(DiscussCmd),
     /// Look up users and manage profiles and presence
     #[command(subcommand)]
     Users(UsersCmd),
@@ -898,6 +901,18 @@ pub enum DmsCmd {
         /// DM conversation UUID
         #[arg(long)]
         channel: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DiscussCmd {
+    /// Fetch an ISM ticket and post its summary to a channel
+    Thread {
+        /// ISM issue ID (e.g., ISM-123)
+        issue_id: String,
+        /// Channel ID (UUID) to post the discussion into
+        #[arg(long)]
+        channel: Option<String>,
     },
 }
 
@@ -2178,6 +2193,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Emoji(sub) => commands::emoji::dispatch(sub, &client).await,
         Cmd::Gifs(sub) => commands::gifs::dispatch(sub, &client).await,
         Cmd::Dms(sub) => commands::dms::dispatch(sub, &client).await,
+        Cmd::Discuss(sub) => commands::discuss::dispatch(sub, &client).await,
         Cmd::Users(sub) => commands::users::dispatch(sub, &client, &cli.format).await,
         Cmd::Workflows(sub) => commands::workflows::dispatch(sub, &client).await,
         Cmd::Feed(sub) => commands::feed::dispatch(sub, &client, &cli.format).await,
