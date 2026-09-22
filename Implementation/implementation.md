@@ -171,6 +171,24 @@ observation that should prompt picking it up.
 
 ---
 
+## Phase 4 — ISM-bridged Supervisor execution (signal-driven, planning only)
+
+Full design discussion, option comparison, and verified feasibility in
+[Improvements/ism-bridge-supervisor-plan.md](../Improvements/ism-bridge-supervisor-plan.md).
+Direct response to the real signal from testing Phase 1: desktop-spawned
+personas don't share identity across users (a known, still-open upstream
+issue, `block/buzz#2910`/`#4174`). Chosen direction is a superset of 3.4
+(Supervisor = the one centrally-deployed identity that fans out internally,
+sidestepping the identity-collision problem by construction), bridged to the
+issue-management project ("ISM") as a data source/sink only — ISM is never
+the executor. Feasibility verified live (ISM reachable at
+`192.168.0.200:8080`, real OpenAPI schema pulled and checked against). **Not
+scoped for a build yet** — four open design questions listed in that doc
+(decision-gating mechanism, ISM field mirroring, trigger shape, and 3.4's own
+execution engine) must be answered first.
+
+---
+
 ## What's deliberately not on this plan
 
 - Kirocrew's vector/FAISS episodic memory, V1/V2 private-memory-store

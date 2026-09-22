@@ -4,6 +4,25 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-22 — Added Phase 4 (planning only, not scoped for build):
+  ISM-bridged Supervisor execution. Responds to the shared-agent-identity
+  gap found while testing Phase 1 (`block/buzz#2910`/`#4174`, confirmed via
+  `Improvements/shared-agent-reference-survey.md` that no one — Slack,
+  Discord, Matrix, Nostr, LangChain, kirocrew, or Jira/Rovo's own approach
+  — has a reusable answer for "one shared agent identity, many independent
+  clients"). Chosen direction (full comparison in
+  `Improvements/ism-bridge-supervisor-plan.md`): Buzz hosts discussion +
+  decision-gating + AI-team execution; the issue-management project
+  ("ISM," `/home/blade/projects/issue-management`) is a data source/sink
+  only, never the executor — verified ISM's own "Sonnet/Andy/Rose" flow is
+  100% manually triggered today, so the execution-engine cost is identical
+  regardless of which system hosts it. Feasibility verified live: ISM
+  reachable at `192.168.0.200:8080` (plain HTTP; port 80/443 on that host
+  belongs to an unrelated `traefik` proxy), real OpenAPI schema pulled and
+  checked (JWT auth, issues/comments/worklogs/transition endpoints all
+  sufficient). Four open design questions block scoping this as a real
+  phase — see the plan doc.
+
 - 2026-09-22 — Phase 2.1 (wishlist 7c, soft form): added an explicit
   "comment only — never merge or approve" rule to the two example
   code-review personas (`examples/meadow-core/agents/lev.persona.md`,
