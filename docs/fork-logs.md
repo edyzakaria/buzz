@@ -4,6 +4,21 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-22 — Resolved Phase 4's four open design questions (full detail
+  in `Improvements/ism-bridge-supervisor-plan.md`): tickets originate in
+  ISM, pulled into Buzz discussion on demand via a human-run command (no
+  ISM webhook/poll needed for v1 — proactive notification deferred to the
+  plan's own "deferred" list); decision-gating is
+  mention-Supervisor → drafted summary → human confirms → execution;
+  Buzz holds only the ISM ticket ID, never mirrors ISM's field model,
+  summarizes to plain Markdown when needed; execution authority defaults
+  to actual implementation (code + PR), deploy/merge always a separate
+  explicit ask, mirroring `buzziro-dev`'s existing discipline; fan-out
+  capped at exactly two children (dev + test, mirroring ISM's own
+  Sonnet→Andy→Rose and this fork's `buzziro-dev`/`buzziro-tester`), one
+  consolidated reply, ISM credentials held only by the Supervisor, one
+  level of spawn depth max. Still planning only — not scoped for a build.
+
 - 2026-09-22 — Added Phase 4 (planning only, not scoped for build):
   ISM-bridged Supervisor execution. Responds to the shared-agent-identity
   gap found while testing Phase 1 (`block/buzz#2910`/`#4174`, confirmed via

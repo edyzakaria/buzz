@@ -182,10 +182,12 @@ issue, `block/buzz#2910`/`#4174`). Chosen direction is a superset of 3.4
 sidestepping the identity-collision problem by construction), bridged to the
 issue-management project ("ISM") as a data source/sink only — ISM is never
 the executor. Feasibility verified live (ISM reachable at
-`192.168.0.200:8080`, real OpenAPI schema pulled and checked against). **Not
-scoped for a build yet** — four open design questions listed in that doc
-(decision-gating mechanism, ISM field mirroring, trigger shape, and 3.4's own
-execution engine) must be answered first.
+`192.168.0.200:8080`, real OpenAPI schema pulled and checked against).
+Design pass complete as of 2026-09-22 (ticket origin/pull direction,
+decision-gating mechanism, field-mirroring, and 3.4's execution-engine
+scope/mechanics — all resolved, full detail in the plan doc). **Still not
+scoped for a build** — this phase remains signal-driven; do not start
+implementation speculatively.
 
 ---
 

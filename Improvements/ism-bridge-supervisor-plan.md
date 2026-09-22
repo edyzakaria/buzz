@@ -80,26 +80,87 @@ ISM.
     state machine, so Buzz cannot corrupt ISM's ticket lifecycle even from
     outside), `POST /issues` if Buzz needs to originate a ticket.
 
-## What's still open — deliberately not designed yet
+## Design decisions (2026-09-22 follow-up pass)
 
-1. **The Supervisor/AI-team execution engine itself.** Maps onto
-   `implementation.md`'s Phase 3.4 ("subagent spawning + consolidated
-   fan-in") — already flagged there as the largest, most structurally
-   important unbuilt item, with real new failure modes (hung children,
-   runaway spawn depth) and the hard design constraint carried from day
-   one: consolidate sibling completions into **one** digest reply, never
-   "each subagent posts its own message."
-2. **How a Buzz discussion formally becomes a "decision."** What role gate,
-   what command/event marks a thread as ratified and hands it to the
-   Supervisor. Not specified.
-3. **How much of ISM's structured ticket fields need mirroring vs. just
-   referencing by ID.** Not decided — depends on how much of ISM's
-   reporting/custom-field machinery actually matters for this workflow
-   day to day.
-4. **Trigger direction and shape.** Does Buzz poll ISM, does ISM eventually
-   grow real webhook-out (currently unbuilt — n8n is deployed on ISM's host
-   but has zero integration code today), or is the "decision" always
-   Buzz-originated so no ISM→Buzz trigger is even needed?
+The four open questions below are now answered at the design level. None of
+this is built — these are decisions to build *against*, not a build log.
 
-Nothing here should be treated as scoped-to-build until those four are
-answered.
+### 1. Ticket origin and pull direction (was: "how a discussion becomes a decision" + "trigger shape")
+
+Tickets originate in ISM normally (opened by ISM's own users, ISM's own UI)
+— unrelated to Buzz at creation time. A role-gated Buzz member pulls one into
+discussion on demand (e.g. `/discuss ISM-123`), which fetches that ticket's
+context live (`GET /issues/{id}` + comments + attachments) into a thread.
+Separately, Buzz teams can discuss freely with **no ISM ticket at all** —
+not everything is ticket-bound.
+
+**Trigger shape is therefore human-initiated pull, not system-triggered
+push.** No polling loop, no webhook-out needed from ISM for v1. A "hey, a
+new/updated ISM ticket exists" proactive notification is a real, wanted
+feature but explicitly **deferred** — noted below, not scoped now.
+
+### 2. Decision-gating mechanism
+
+1. A lead/maintainer (role-gated) `@mentions` the Supervisor in the thread.
+2. Supervisor reads the thread and posts a **drafted summary** — scope,
+   acceptance criteria, links — as a proposal, not an action.
+3. The same role reviews: confirms as-is, asks for a redraft, or edits
+   directly.
+4. Only on confirmation does Supervisor transition into execution mode.
+
+Four auditable states: mentioned → drafted → confirmed → executing. If the
+thread is linked to an ISM ticket (via step 1's `/discuss`), status writes
+back to it as execution proceeds. If it's a free discussion that gets
+confirmed anyway, confirmation is also the moment Buzz calls `POST /issues`
+to create one retroactively, if the team wants it tracked.
+
+### 3. ISM field mirroring
+
+**Don't mirror.** Buzz holds only the ISM ticket ID as a reference and
+fetches live when needed. When Buzz needs to present ticket info for
+discussion or as a knowledge-base entry, it summarizes into plain Markdown —
+never replicates ISM's typed field/schema model. Revisit only if a concrete
+case emerges needing to filter/act on a specific ISM field without a live
+fetch (none identified yet).
+
+### 4. Execution engine scope and mechanics (Phase 3.4)
+
+**Authority:** default is actual implementation (write code, commit, open a
+PR) — not analysis-only. **Deploy/merge is always a separate, explicitly
+requested action** by whoever's in charge, never automatic on completion.
+Mirrors the `buzziro-dev` discipline already proven in this fork (implement
++ PR, ask before merge, ask before deploy).
+
+**Fan-out:** exactly two canonical children per execution — a developer role
+(implements) and a tester role (verifies) — mirroring the pattern already
+proven twice (ISM's Sonnet→Andy→Rose; this fork's own
+`buzziro-dev`→`buzziro-tester`). Not an open-ended "AI team" for v1.
+Extending beyond two roles (e.g. an architecture/security reviewer) is a
+future step, only once real usage shows the two-role split isn't enough —
+same discipline, not a redesign.
+
+**Consolidation:** exactly one reply per execution, posted only once both
+children finish — what was done, test results, PR link. Matches Phase 3.4's
+own pre-existing design constraint; hold this strictly.
+
+**Tooling access:** dev child gets `buzz-dev-mcp` shell/file access under
+Phase 0.2's already-decided trusted-team-only exposure model (no new
+exposure decision needed). Test child gets the same tools, scoped
+read/verify-only, mirroring `buzziro-tester`'s existing safety rules. **ISM
+credentials live only with the Supervisor**, never the children — one
+identity holds the ISM-facing write surface.
+
+**Failure handling:** fan-out capped at one level (children cannot spawn
+their own children — eliminates runaway spawn depth by construction, not by
+runtime policing). One overall timeout/budget per execution; on breach,
+Supervisor posts a status update rather than going silent. A child quiet
+past its own bound is treated as failed and reported honestly in the digest.
+
+## Deferred — noted, not scoped
+
+- **ISM → Buzz notification/webhook.** Proactively surfacing new/updated
+  ISM tickets in Buzz, instead of relying on a human to `/discuss` them
+  manually. Wanted, real, but requires building the webhook-out ISM doesn't
+  have today (n8n is deployed on ISM's host with zero integration code) —
+  or a polling loop. Revisit once the human-pull flow is actually in use and
+  the gap is felt, not before.
