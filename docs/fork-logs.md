@@ -4,6 +4,14 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-22 — Phase 2.1 (wishlist 7c, soft form): added an explicit
+  "comment only — never merge or approve" rule to the two example
+  code-review personas (`examples/meadow-core/agents/lev.persona.md`,
+  `bana.persona.md`). Zero code, as scoped — the harness still has no
+  tool-level allow/deny mechanism to enforce this (verified prior session);
+  the enforced version stays tracked under Phase 3's 7c-hard, bundled with
+  5b.
+
 - 2026-09-21 — Phase 0.2 decided: buzz-dev-mcp's shell/file/search tools are
   reachable only by a small trusted team, so full OS-level sandboxing (Linux
   namespaces/Seatbelt) is deferred — documented, not silently skipped, per
