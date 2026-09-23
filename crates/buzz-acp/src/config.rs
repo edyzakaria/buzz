@@ -278,7 +278,9 @@ pub struct RunTaskArgs {
     pub prompt_file: Option<std::path::PathBuf>,
 
     /// Tool scope: "full" (all tools) or "read-only" (read/verify only).
-    /// Currently a placeholder; tool-gating is not yet implemented.
+    /// In read-only mode, str_replace is denied and a hardcoded deny-list of destructive
+    /// shell commands (docker compose, rm -rf, git push --force, git reset --hard, etc.)
+    /// is enforced by buzz-dev-mcp.
     #[arg(long, default_value = "full")]
     pub tool_scope: String,
 

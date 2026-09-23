@@ -20,19 +20,121 @@ mod todo;
 mod tree;
 mod view_image;
 
+/// Tool scope controls which tools can be executed by the dev MCP server.
+/// ReadOnly restricts file modification and destructive shell commands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ToolScope {
+    /// All tools available (default, backward compatible).
+    Full,
+    /// Read-only: denies str_replace and a hardcoded deny-list of shell commands
+    /// (docker compose, rm -rf, git push --force, git reset --hard, git clean -fdx, etc.).
+    /// This is a guard against a well-behaved-but-misdirected agent, not a security boundary
+    /// against a fully adversarial one — full OS-level sandboxing remains deferred.
+    ReadOnly,
+}
+
+impl ToolScope {
+    /// Parse from env var `BUZZ_DEV_MCP_TOOL_SCOPE` (full/read-only, case-insensitive).
+    /// Defaults to Full if unset or unrecognized.
+    fn from_env() -> Self {
+        match std::env::var("BUZZ_DEV_MCP_TOOL_SCOPE")
+            .ok()
+            .as_deref()
+            .map(|s| s.to_ascii_lowercase())
+        {
+            Some(s) if s == "read-only" || s == "readonly" => Self::ReadOnly,
+            _ => Self::Full,
+        }
+    }
+
+    /// Check if a command string is blocked in read-only mode.
+    /// Returns Some(reason) if blocked, None if allowed.
+    /// This is a pattern-match deny-list on literal strings/substrings,
+    /// not a cryptographically-strong sandbox.
+    fn check_blocked_command(&self, cmd: &str) -> Option<String> {
+        if *self != ToolScope::ReadOnly {
+            return None;
+        }
+
+        // Convert to lowercase for case-insensitive matching
+        let cmd_lower = cmd.to_ascii_lowercase();
+
+        // Docker compose: any subcommand variant
+        if (cmd_lower.contains("docker compose") || cmd_lower.contains("docker-compose"))
+            && (cmd_lower.contains("up")
+                || cmd_lower.contains("down")
+                || cmd_lower.contains("restart")
+                || cmd_lower.contains("stop")
+                || cmd_lower.contains("rm ")
+                || (cmd_lower.contains("docker compose") && !cmd_lower.contains("ps")))
+        {
+            return Some("docker compose subcommands are blocked in read-only mode".to_string());
+        }
+
+        // docker volume rm
+        if cmd_lower.contains("docker volume rm") {
+            return Some("docker volume rm is blocked in read-only mode".to_string());
+        }
+
+        // docker system prune
+        if cmd_lower.contains("docker system prune") {
+            return Some("docker system prune is blocked in read-only mode".to_string());
+        }
+
+        // docker kill
+        if cmd_lower.contains("docker kill") {
+            return Some("docker kill is blocked in read-only mode".to_string());
+        }
+
+        // rm -rf (catch common patterns)
+        if cmd_lower.contains("rm -rf") || cmd_lower.contains("rm -r") {
+            return Some("rm -rf / rm -r is blocked in read-only mode".to_string());
+        }
+
+        // git push --force or --force-with-lease
+        if cmd_lower.contains("git push")
+            && (cmd_lower.contains("--force-with-lease") || cmd_lower.contains("--force"))
+        {
+            return Some("git push --force is blocked in read-only mode".to_string());
+        }
+
+        // git reset --hard
+        if cmd_lower.contains("git reset") && cmd_lower.contains("--hard") {
+            return Some("git reset --hard is blocked in read-only mode".to_string());
+        }
+
+        // git clean -fdx
+        if cmd_lower.contains("git clean")
+            && (cmd_lower.contains("-fdx") || cmd_lower.contains("-f"))
+        {
+            return Some("git clean -fdx is blocked in read-only mode".to_string());
+        }
+
+        // git branch -D / branch -d (deletion)
+        if cmd_lower.contains("git branch -d") || cmd_lower.contains("git branch -D") {
+            return Some("git branch deletion is blocked in read-only mode".to_string());
+        }
+
+        None
+    }
+}
+
 #[derive(Clone)]
 struct DevMcp {
     state: Arc<shell::SharedState>,
     todos: Arc<todo::TodoState>,
+    tool_scope: ToolScope,
     tool_router: ToolRouter<DevMcp>,
 }
 
 #[tool_router]
 impl DevMcp {
     fn new(state: Arc<shell::SharedState>) -> Self {
+        let tool_scope = ToolScope::from_env();
         Self {
             state,
             todos: Arc::new(todo::TodoState::new()),
+            tool_scope,
             tool_router: Self::tool_router(),
         }
     }
@@ -46,6 +148,10 @@ impl DevMcp {
         Parameters(p): Parameters<shell::ShellParams>,
         context: rmcp::service::RequestContext<rmcp::service::RoleServer>,
     ) -> Result<CallToolResult, ErrorData> {
+        // Check deny-list for read-only scope
+        if let Some(reason) = self.tool_scope.check_blocked_command(&p.command) {
+            return Err(ErrorData::invalid_params(reason, None));
+        }
         shell::run(&self.state, p, context.ct).await
     }
 
@@ -79,6 +185,12 @@ impl DevMcp {
         &self,
         Parameters(p): Parameters<str_replace::StrReplaceParams>,
     ) -> Result<String, ErrorData> {
+        if self.tool_scope == ToolScope::ReadOnly {
+            return Err(ErrorData::invalid_params(
+                "str_replace tool is not available in read-only mode",
+                None,
+            ));
+        }
         str_replace::run(&self.state, p)
     }
 
@@ -210,4 +322,173 @@ pub(crate) fn configure_no_window_async(cmd: &mut tokio::process::Command) {
     }
     #[cfg(not(windows))]
     let _ = cmd;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tool_scope_default_is_full() {
+        // Unset env var should default to Full
+        std::env::remove_var("BUZZ_DEV_MCP_TOOL_SCOPE");
+        assert_eq!(ToolScope::from_env(), ToolScope::Full);
+    }
+
+    #[test]
+    fn test_tool_scope_read_only_variants() {
+        // "read-only" should parse as ReadOnly
+        std::env::set_var("BUZZ_DEV_MCP_TOOL_SCOPE", "read-only");
+        assert_eq!(ToolScope::from_env(), ToolScope::ReadOnly);
+
+        // "readonly" (no dash) should also parse
+        std::env::set_var("BUZZ_DEV_MCP_TOOL_SCOPE", "readonly");
+        assert_eq!(ToolScope::from_env(), ToolScope::ReadOnly);
+
+        // Case insensitive
+        std::env::set_var("BUZZ_DEV_MCP_TOOL_SCOPE", "READ-ONLY");
+        assert_eq!(ToolScope::from_env(), ToolScope::ReadOnly);
+
+        std::env::remove_var("BUZZ_DEV_MCP_TOOL_SCOPE");
+    }
+
+    #[test]
+    fn test_tool_scope_invalid_defaults_to_full() {
+        std::env::set_var("BUZZ_DEV_MCP_TOOL_SCOPE", "invalid");
+        assert_eq!(ToolScope::from_env(), ToolScope::Full);
+
+        std::env::set_var("BUZZ_DEV_MCP_TOOL_SCOPE", "full");
+        assert_eq!(ToolScope::from_env(), ToolScope::Full);
+
+        std::env::remove_var("BUZZ_DEV_MCP_TOOL_SCOPE");
+    }
+
+    #[test]
+    fn test_blocked_commands_docker_compose() {
+        let scope = ToolScope::Full;
+        // Full scope should not block anything
+        assert_eq!(scope.check_blocked_command("docker compose down"), None);
+
+        let scope = ToolScope::ReadOnly;
+        // ReadOnly should block docker compose down
+        assert!(scope.check_blocked_command("docker compose down").is_some());
+        // ReadOnly should block docker-compose (with dash)
+        assert!(scope.check_blocked_command("docker-compose up").is_some());
+        // ReadOnly should block docker compose restart
+        assert!(scope
+            .check_blocked_command("docker compose restart")
+            .is_some());
+        // ReadOnly should block docker compose rm
+        assert!(scope.check_blocked_command("docker compose rm").is_some());
+        // ReadOnly should block docker compose stop
+        assert!(scope.check_blocked_command("docker compose stop").is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_rm_rf() {
+        let scope = ToolScope::ReadOnly;
+        // Should block rm -rf
+        assert!(scope.check_blocked_command("rm -rf /tmp/foo").is_some());
+        // Should block rm -r (without f)
+        assert!(scope.check_blocked_command("rm -r /tmp/foo").is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_git_push_force() {
+        let scope = ToolScope::ReadOnly;
+        // Should block git push --force
+        assert!(scope.check_blocked_command("git push --force").is_some());
+        // Should block git push --force-with-lease
+        assert!(scope
+            .check_blocked_command("git push --force-with-lease origin main")
+            .is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_git_reset_hard() {
+        let scope = ToolScope::ReadOnly;
+        // Should block git reset --hard
+        assert!(scope
+            .check_blocked_command("git reset --hard HEAD")
+            .is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_git_clean() {
+        let scope = ToolScope::ReadOnly;
+        // Should block git clean -fdx
+        assert!(scope.check_blocked_command("git clean -fdx").is_some());
+        // Should block git clean -f
+        assert!(scope.check_blocked_command("git clean -f").is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_git_branch_delete() {
+        let scope = ToolScope::ReadOnly;
+        // Should block git branch -D
+        assert!(scope
+            .check_blocked_command("git branch -D feature")
+            .is_some());
+        // Should block git branch -d
+        assert!(scope
+            .check_blocked_command("git branch -d feature")
+            .is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_docker_volume_rm() {
+        let scope = ToolScope::ReadOnly;
+        // Should block docker volume rm
+        assert!(scope
+            .check_blocked_command("docker volume rm my-volume")
+            .is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_docker_system_prune() {
+        let scope = ToolScope::ReadOnly;
+        // Should block docker system prune
+        assert!(scope.check_blocked_command("docker system prune").is_some());
+    }
+
+    #[test]
+    fn test_blocked_commands_docker_kill() {
+        let scope = ToolScope::ReadOnly;
+        // Should block docker kill
+        assert!(scope
+            .check_blocked_command("docker kill container-name")
+            .is_some());
+    }
+
+    #[test]
+    fn test_allowed_commands_in_read_only() {
+        let scope = ToolScope::ReadOnly;
+        // Safe commands should be allowed
+        assert_eq!(scope.check_blocked_command("echo hello"), None);
+        assert_eq!(scope.check_blocked_command("cargo test"), None);
+        assert_eq!(scope.check_blocked_command("just ci"), None);
+        assert_eq!(scope.check_blocked_command("git status"), None);
+        assert_eq!(scope.check_blocked_command("docker ps"), None);
+        assert_eq!(scope.check_blocked_command("ls -la"), None);
+    }
+
+    #[test]
+    fn test_full_scope_allows_everything() {
+        let scope = ToolScope::Full;
+        // Full scope should allow everything (doesn't block)
+        assert_eq!(scope.check_blocked_command("docker compose down"), None);
+        assert_eq!(scope.check_blocked_command("rm -rf /tmp/foo"), None);
+        assert_eq!(scope.check_blocked_command("git push --force"), None);
+        assert_eq!(scope.check_blocked_command("git reset --hard"), None);
+    }
+
+    #[test]
+    fn test_case_insensitive_blocking() {
+        let scope = ToolScope::ReadOnly;
+        // Should match case-insensitively
+        assert!(scope.check_blocked_command("DOCKER COMPOSE DOWN").is_some());
+        assert!(scope.check_blocked_command("Docker Compose Up").is_some());
+        assert!(scope.check_blocked_command("RM -RF /tmp").is_some());
+        assert!(scope.check_blocked_command("GIT PUSH --FORCE").is_some());
+    }
 }
