@@ -4,6 +4,26 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-23 — **Phase 4 built and merged (PR #2, `90cb3c6b`).** ISM-bridged
+  Supervisor execution moved from planning-only to real, working code:
+  `buzz-ism` client + `buzz discuss thread` (pulls ISM tickets into a channel
+  as Markdown); Supervisor persona + 4-state decision-gating
+  (`mentioned → drafted → confirmed → executing`) tracked via Nostr event
+  tags with best-effort ISM status write-back; a new `buzz-acp run-task`
+  one-shot agent-execution primitive (didn't exist before — required for
+  real, non-simulated execution); and real 2-child dev/tester fan-out via
+  `run-task`, replacing three earlier attempts that each disguised a
+  placeholder as real execution (caught by reading the actual code, not
+  trusting subagent self-reports — see PR #2's commit history). All
+  independently verified: `cargo fmt`/`clippy -D warnings`/`test` clean
+  across `buzz-ism`, `buzz-cli`, `buzz-acp`. **Known, disclosed gap:**
+  `run-task --tool-scope` doesn't enforce anything yet — `buzz-dev-mcp` has
+  no tool-gating mechanism, so dev and tester currently share the same
+  (bypass) permission mode. Tracked as Phase 3.5, not hidden debt. **Not yet
+  done:** end-to-end exercise against a live relay + real LLM credentials.
+  Also opened PR #3 (separate, unmerged as of this entry): stops
+  backend-only Rust PRs from auto-triggering the ~19min Desktop/E2E CI
+  suite, adds `workflow_dispatch` to run it manually when wanted.
 - 2026-09-22 — Resolved Phase 4's four open design questions (full detail
   in `Improvements/ism-bridge-supervisor-plan.md`): tickets originate in
   ISM, pulled into Buzz discussion on demand via a human-run command (no

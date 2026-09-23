@@ -171,7 +171,7 @@ observation that should prompt picking it up.
 
 ---
 
-## Phase 4 — ISM-bridged Supervisor execution (signal-driven, planning only)
+## Phase 4 — ISM-bridged Supervisor execution (built, merged 2026-09-23)
 
 Full design discussion, option comparison, and verified feasibility in
 [Improvements/ism-bridge-supervisor-plan.md](../Improvements/ism-bridge-supervisor-plan.md).
@@ -183,11 +183,19 @@ sidestepping the identity-collision problem by construction), bridged to the
 issue-management project ("ISM") as a data source/sink only — ISM is never
 the executor. Feasibility verified live (ISM reachable at
 `192.168.0.200:8080`, real OpenAPI schema pulled and checked against).
-Design pass complete as of 2026-09-22 (ticket origin/pull direction,
-decision-gating mechanism, field-mirroring, and 3.4's execution-engine
-scope/mechanics — all resolved, full detail in the plan doc). **Still not
-scoped for a build** — this phase remains signal-driven; do not start
-implementation speculatively.
+
+**Built and merged into `main` (PR #2, `90cb3c6b`, 2026-09-23):** `buzz-ism`
+client + `buzz discuss thread` pull command; Supervisor persona + 4-state
+decision-gating; a new `buzz-acp run-task` one-shot execution primitive
+(this crate had none before — genuinely new surface, as flagged under 3.4
+below); real 2-child dev/tester fan-out via `run-task`. Verified via
+`cargo fmt`/`clippy -D warnings`/`test` across `buzz-ism`, `buzz-cli`,
+`buzz-acp` — not yet exercised end-to-end against a live relay + real LLM
+credentials. **Known, disclosed gap:** `run-task --tool-scope` (full vs.
+read-only) doesn't enforce anything yet — `buzz-dev-mcp` has no tool-gating
+mechanism, so dev and tester currently share the same permission mode. This
+is exactly Phase 3.5's scope below; not new debt, just now has a concrete
+caller waiting on it.
 
 ---
 
