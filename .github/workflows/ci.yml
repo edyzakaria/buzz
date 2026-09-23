@@ -5,8 +5,8 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      run_desktop_e2e:
-        description: 'Force the full Desktop/E2E suite (Tauri build + Playwright) to run, even for backend-only changes'
+      run_full_suite:
+        description: 'Force the full Desktop/Relay/Postgres/Clients suite to run — everything except Rust Lint/Unit Tests/Security/Rust Cross-Compile, which always run automatically on every PR'
         type: boolean
         default: false
 
@@ -166,14 +166,13 @@ jobs:
   desktop-domain:
     name: Desktop Domain
     needs: [changes]
-    # NOTE: intentionally does NOT trigger on a bare backend `rust` change —
-    # only on desktop-facing changes, a push to main/release, or an explicit
-    # manual request (`gh workflow run ci.yml -f run_desktop_e2e=true`).
-    # This is a real, accepted trade-off: a workspace-wide dependency bump in
-    # crates/** could in principle still break the desktop Tauri build without
-    # this catching it pre-merge. Run it manually before merging any PR that
-    # touches shared dependencies you're unsure about.
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_desktop_e2e == 'true')
+    # Manual-only for PRs (see docs/fork-ci-policy.md): only a push to
+    # main/release or an explicit `gh workflow run ci.yml -f
+    # run_full_suite=true` runs this. Real, accepted trade-off: nothing
+    # auto-catches a desktop build break pre-merge anymore, including actual
+    # desktop/** changes — the assisting agent must judge and recommend
+    # running this manually per PR, per the policy doc.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-desktop.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -183,7 +182,8 @@ jobs:
   relay-artifacts-domain:
     name: Relay Artifact Producer
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-relay.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -194,7 +194,8 @@ jobs:
   postgres-domain:
     name: PostgreSQL Domain
     needs: [changes, relay-artifacts-domain]
-    if: github.event_name == 'push' || needs.changes.outputs.rust == 'true'
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-relay.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -205,8 +206,8 @@ jobs:
   desktop-macos-domain:
     name: Desktop macOS Domain
     needs: [changes]
-    # Same intentional trade-off as desktop-domain above — see its comment.
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_desktop_e2e == 'true')
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-desktop-macos.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -216,7 +217,8 @@ jobs:
   relay-domain:
     name: Relay and PostgreSQL
     needs: [changes, relay-artifacts-domain]
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-relay.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -227,7 +229,8 @@ jobs:
   clients:
     name: Clients
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.web == 'true' || needs.changes.outputs.mobile == 'true'
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-clients.yml
     with:
       web: ${{ needs.changes.outputs.web == 'true' }}
@@ -237,7 +240,8 @@ jobs:
   mobile-swift-domain:
     name: Mobile Swift Domain
     needs: [changes]
-    if: needs.changes.outputs.mobile == 'true'
+    # Manual-only for PRs — see docs/fork-ci-policy.md.
+    if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true')
     uses: ./.github/workflows/_ci-clients.yml
     with:
       web: ${{ needs.changes.outputs.web == 'true' }}
@@ -293,7 +297,7 @@ jobs:
 
   desktop:
     name: Desktop
-    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, desktop-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -306,7 +310,7 @@ jobs:
 
   desktop-build-macos:
     name: Desktop Build (macOS)
-    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, desktop-macos-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -319,7 +323,7 @@ jobs:
 
   desktop-e2e-relay:
     name: Desktop E2E Relay
-    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, relay-artifacts-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -332,7 +336,7 @@ jobs:
 
   desktop-e2e-integration:
     name: Desktop E2E Integration
-    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, relay-artifacts-domain, relay-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -345,7 +349,7 @@ jobs:
 
   backend-integration:
     name: Backend Integration (relay e2e)
-    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, relay-artifacts-domain, relay-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -358,7 +362,7 @@ jobs:
 
   postgres-tests:
     name: PostgreSQL Tests
-    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, relay-artifacts-domain, postgres-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -371,7 +375,7 @@ jobs:
 
   relay-e2e:
     name: Relay E2E
-    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.rust == 'true')
+    if: always() && needs.changes.result == 'success' && needs.relay-artifacts-domain.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, relay-artifacts-domain, relay-domain]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -384,7 +388,7 @@ jobs:
 
   web:
     name: Web
-    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.web == 'true')
+    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, clients]
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -397,7 +401,7 @@ jobs:
 
   mobile:
     name: Mobile
-    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || needs.changes.outputs.mobile == 'true')
+    if: always() && needs.changes.result == 'success' && (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_full_suite == 'true'))
     needs: [changes, clients]
     runs-on: ubuntu-latest
     timeout-minutes: 5
