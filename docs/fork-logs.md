@@ -4,6 +4,25 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-23 — **CI scope broadened: everything except Rust Lint/Unit
+  Tests/Windows Rust/Rust Cross-Compile/Security is now manual-only on
+  PRs.** User explicitly wanted CI wait time off by default entirely, not
+  just Desktop. Extended the PR #3 pattern to `relay-artifacts-domain`,
+  `postgres-domain`, `relay-domain`, `clients`, `mobile-swift-domain`; renamed
+  the manual-dispatch input from `run_desktop_e2e` to `run_full_suite` (one
+  switch for everything). Caught and fixed a real correctness risk while
+  doing this: several secondary "Results" gate jobs (`desktop`, `web`,
+  `mobile`, etc.) checked their parent domain's output without a
+  `.result == 'success'` guard — left unfixed, they would have started
+  **failing** (not skipping) on ordinary backend PRs once their parent
+  domain started skipping, since a skipped reusable workflow produces no
+  output for `test "$RESULT" = success` to read. Updated all of them to the
+  same manual-only trigger condition. `docs/fork-ci-policy.md` and
+  `buzziro-tester.md` rewritten to match. Trade-off, stated plainly: no CI
+  domain except the 5 kept-automatic ones catches a regression pre-merge on
+  a PR anymore, including real desktop/relay/client changes — the assisting
+  agent's judgment (per the policy doc) is now the only automatic-adjacent
+  safety net for PRs; a push to main/release still always runs everything.
 - 2026-09-23 — **PR #3 merged (`d9cda98a`).** Includes a second commit
   (`e9d4432d`) beyond the original manual-trigger change: found and fixed a
   real, pre-existing bug in the `desktop:` path-filter itself — a standalone
