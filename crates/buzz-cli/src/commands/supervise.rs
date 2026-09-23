@@ -1,9 +1,7 @@
 use crate::client::BuzzClient;
 use crate::decision_gate::{self, DecisionState};
 use crate::error::CliError;
-use crate::validate::parse_uuid;
-use nostr::Tag;
-use uuid::Uuid;
+use crate::validate::parse_event_id;
 
 /// Dispatch the supervise subcommand.
 pub async fn dispatch(cmd: crate::SuperviseCmd, client: &BuzzClient) -> Result<(), CliError> {
@@ -18,7 +16,9 @@ pub async fn dispatch(cmd: crate::SuperviseCmd, client: &BuzzClient) -> Result<(
             thread,
             summary,
         } => cmd_confirm(client, channel, thread, summary).await,
-        crate::SuperviseCmd::Execute { channel, thread } => cmd_execute(client, channel, thread).await,
+        crate::SuperviseCmd::Execute { channel, thread } => {
+            cmd_execute(client, channel, thread).await
+        }
     }
 }
 
@@ -32,20 +32,25 @@ async fn cmd_draft(
     summary: String,
 ) -> Result<(), CliError> {
     // Parse and validate inputs
-    let channel_uuid = parse_uuid(&channel)
+    let channel_uuid = crate::validate::parse_uuid(&channel)
         .map_err(|_| CliError::Other(format!("invalid channel ID: {}", channel)))?;
-    let _thread_id = parse_uuid(&thread)
-        .map_err(|_| CliError::Other(format!("invalid thread ID: {}", thread)))?;
+    let _thread_eid = parse_event_id(&thread)
+        .map_err(|_| CliError::Other(format!("invalid thread event ID: {}", thread)))?;
+
+    // Resolve thread reference (fetch parent event and resolve root via NIP-10)
+    let thread_ref = super::messages::resolve_thread_ref(client, &thread)
+        .await
+        .map_err(|e| CliError::Other(format!("failed to resolve thread: {}", e)))?;
 
     // Build message event with decision_state tag
     let builder = buzz_sdk::build_message(
         channel_uuid,
         &summary,
-        Some(thread.clone()), // thread_ref
-        &[],                  // mention_refs
-        false,                // broadcast
-        &[],                  // media_tags
-        &[],                  // emoji_tags
+        Some(&thread_ref),
+        &[],   // mention_refs
+        false, // broadcast
+        &[],   // media_tags
+        &[],   // emoji_tags
     )
     .map_err(|e| CliError::Other(format!("failed to build message: {}", e)))?;
 
@@ -88,10 +93,15 @@ async fn cmd_confirm(
     summary: Option<String>,
 ) -> Result<(), CliError> {
     // Parse and validate inputs
-    let channel_uuid = parse_uuid(&channel)
+    let channel_uuid = crate::validate::parse_uuid(&channel)
         .map_err(|_| CliError::Other(format!("invalid channel ID: {}", channel)))?;
-    let _thread_id = parse_uuid(&thread)
-        .map_err(|_| CliError::Other(format!("invalid thread ID: {}", thread)))?;
+    let _thread_eid = parse_event_id(&thread)
+        .map_err(|_| CliError::Other(format!("invalid thread event ID: {}", thread)))?;
+
+    // Resolve thread reference (fetch parent event and resolve root via NIP-10)
+    let thread_ref = super::messages::resolve_thread_ref(client, &thread)
+        .await
+        .map_err(|e| CliError::Other(format!("failed to resolve thread: {}", e)))?;
 
     // If summary provided, post it; otherwise post a simple confirmation
     let content = match summary {
@@ -103,7 +113,7 @@ async fn cmd_confirm(
     let builder = buzz_sdk::build_message(
         channel_uuid,
         &content,
-        Some(thread.clone()),
+        Some(&thread_ref),
         &[],
         false,
         &[],
@@ -145,16 +155,17 @@ async fn cmd_confirm(
 ///
 /// Transitions the decision to "executing" state and posts a placeholder message.
 /// (Full execution with dev+test fan-out is Phase 4, increment 3.)
-async fn cmd_execute(
-    client: &BuzzClient,
-    channel: String,
-    thread: String,
-) -> Result<(), CliError> {
+async fn cmd_execute(client: &BuzzClient, channel: String, thread: String) -> Result<(), CliError> {
     // Parse and validate inputs
-    let channel_uuid = parse_uuid(&channel)
+    let channel_uuid = crate::validate::parse_uuid(&channel)
         .map_err(|_| CliError::Other(format!("invalid channel ID: {}", channel)))?;
-    let _thread_id = parse_uuid(&thread)
-        .map_err(|_| CliError::Other(format!("invalid thread ID: {}", thread)))?;
+    let _thread_eid = parse_event_id(&thread)
+        .map_err(|_| CliError::Other(format!("invalid thread event ID: {}", thread)))?;
+
+    // Resolve thread reference (fetch parent event and resolve root via NIP-10)
+    let thread_ref = super::messages::resolve_thread_ref(client, &thread)
+        .await
+        .map_err(|e| CliError::Other(format!("failed to resolve thread: {}", e)))?;
 
     // Post execution message
     let content = "Executing — implementation coming in increment 3.";
@@ -162,7 +173,7 @@ async fn cmd_execute(
     let builder = buzz_sdk::build_message(
         channel_uuid,
         content,
-        Some(thread.clone()),
+        Some(&thread_ref),
         &[],
         false,
         &[],

@@ -192,11 +192,7 @@ impl IsmClient {
     }
 
     /// Create a new issue.
-    pub async fn create_issue(
-        &self,
-        title: &str,
-        description: Option<&str>,
-    ) -> Result<String> {
+    pub async fn create_issue(&self, title: &str, description: Option<&str>) -> Result<String> {
         let token = self.get_token().await?;
         let url = format!("{}/api/v1/issues", self.base_url);
 

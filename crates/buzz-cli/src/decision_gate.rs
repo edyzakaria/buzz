@@ -9,7 +9,8 @@
 //! State is tracked via Nostr event tags (`["decision_state", "<state>"]`).
 //! Transitions are auditable via the event history.
 
-use nostr::Tag;
+use nostr::{EventBuilder, Tag};
+use std::str::FromStr;
 
 use crate::error::CliError;
 
@@ -36,24 +37,27 @@ impl DecisionState {
             Self::Executing => "executing",
         }
     }
+}
 
-    /// Parse from a string.
-    pub fn from_str(s: &str) -> Option<Self> {
+impl FromStr for DecisionState {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "mentioned" => Some(Self::Mentioned),
-            "drafted" => Some(Self::Drafted),
-            "confirmed" => Some(Self::Confirmed),
-            "executing" => Some(Self::Executing),
-            _ => None,
+            "mentioned" => Ok(Self::Mentioned),
+            "drafted" => Ok(Self::Drafted),
+            "confirmed" => Ok(Self::Confirmed),
+            "executing" => Ok(Self::Executing),
+            _ => Err(format!("unknown decision state: {}", s)),
         }
     }
 }
 
 /// Adds a decision-state tag to a message builder.
 pub fn add_decision_state_tag(
-    builder: buzz_sdk::EventBuilder,
+    builder: EventBuilder,
     state: DecisionState,
-) -> Result<buzz_sdk::EventBuilder, CliError> {
+) -> Result<EventBuilder, CliError> {
     let tag = Tag::parse(["decision_state", state.as_str()])
         .map_err(|e| CliError::Other(format!("failed to create decision_state tag: {}", e)))?;
     Ok(builder.tag(tag))
@@ -75,8 +79,9 @@ pub async fn sync_state_to_ism(
 ) -> Result<(), CliError> {
     if let Some(ticket_id) = ism_ticket_id {
         // Get ISM client from environment
-        let ism_base_url = std::env::var("BUZZ_ISM_BASE_URL")
-            .map_err(|_| CliError::Usage("BUZZ_ISM_BASE_URL environment variable not set".into()))?;
+        let ism_base_url = std::env::var("BUZZ_ISM_BASE_URL").map_err(|_| {
+            CliError::Usage("BUZZ_ISM_BASE_URL environment variable not set".into())
+        })?;
 
         let ism_email = std::env::var("BUZZ_ISM_SERVICE_EMAIL").map_err(|_| {
             CliError::Usage("BUZZ_ISM_SERVICE_EMAIL environment variable not set".into())
@@ -122,16 +127,14 @@ pub async fn sync_state_to_ism(
 ///
 /// # Returns
 /// The new ISM ticket ID (e.g., "ISM-124")
-pub async fn create_issue_for_decision(
-    title: &str,
-    description: &str,
-) -> Result<String, CliError> {
+pub async fn create_issue_for_decision(title: &str, description: &str) -> Result<String, CliError> {
     // Get ISM client from environment
     let ism_base_url = std::env::var("BUZZ_ISM_BASE_URL")
         .map_err(|_| CliError::Usage("BUZZ_ISM_BASE_URL environment variable not set".into()))?;
 
-    let ism_email = std::env::var("BUZZ_ISM_SERVICE_EMAIL")
-        .map_err(|_| CliError::Usage("BUZZ_ISM_SERVICE_EMAIL environment variable not set".into()))?;
+    let ism_email = std::env::var("BUZZ_ISM_SERVICE_EMAIL").map_err(|_| {
+        CliError::Usage("BUZZ_ISM_SERVICE_EMAIL environment variable not set".into())
+    })?;
 
     let ism_password = std::env::var("BUZZ_ISM_SERVICE_PASSWORD").map_err(|_| {
         CliError::Usage("BUZZ_ISM_SERVICE_PASSWORD environment variable not set".into())
@@ -164,13 +167,13 @@ mod tests {
 
         for state in states {
             let s = state.as_str();
-            let parsed = DecisionState::from_str(s).expect("failed to parse");
+            let parsed: DecisionState = s.parse().expect("failed to parse");
             assert_eq!(parsed, state);
         }
     }
 
     #[test]
     fn test_decision_state_unknown() {
-        assert_eq!(DecisionState::from_str("unknown"), None);
+        assert!("unknown".parse::<DecisionState>().is_err());
     }
 }

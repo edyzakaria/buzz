@@ -1,7 +1,7 @@
 pub mod agent_management;
-pub mod decision_gate;
 mod client;
 mod commands;
+pub mod decision_gate;
 mod error;
 mod help_tree;
 mod links;
@@ -2391,6 +2391,7 @@ mod tests {
             "agents",
             "canvas",
             "channels",
+            "discuss",
             "dms",
             "emoji",
             "feed",
@@ -2408,6 +2409,7 @@ mod tests {
             "reactions",
             "repos",
             "social",
+            "supervise",
             "upload",
             "users",
             "workflows",

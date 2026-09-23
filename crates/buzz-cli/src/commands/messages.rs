@@ -22,7 +22,7 @@ use buzz_sdk::mentions::{
 ///   the root).
 /// - A root-only or marker-less parent returns `None` (it is top-level and its
 ///   own root).
-fn find_root_from_tags(tags: &serde_json::Value) -> Option<String> {
+pub(crate) fn find_root_from_tags(tags: &serde_json::Value) -> Option<String> {
     let parts: Vec<Vec<String>> = tags
         .as_array()?
         .iter()
@@ -39,7 +39,7 @@ fn find_root_from_tags(tags: &serde_json::Value) -> Option<String> {
         .map(|(root, _)| root)
 }
 
-fn thread_ref_from_parent_tags(
+pub(crate) fn thread_ref_from_parent_tags(
     parent_eid: nostr::EventId,
     parent_event_id: &str,
     tags: &serde_json::Value,
@@ -63,7 +63,10 @@ fn thread_ref_from_parent_tags(
 /// - Nested reply: `root` is the parent's own root marker; `parent` is unchanged.
 ///
 /// Ensures CLI-sent replies thread correctly using the same NIP-10 logic.
-async fn fetch_event(client: &BuzzClient, event_id: &str) -> Result<serde_json::Value, CliError> {
+pub(crate) async fn fetch_event(
+    client: &BuzzClient,
+    event_id: &str,
+) -> Result<serde_json::Value, CliError> {
     let filter = serde_json::json!({ "ids": [event_id], "limit": 1 });
     let raw = client.query(&filter).await?;
     let events: serde_json::Value = serde_json::from_str(&raw)
@@ -75,7 +78,7 @@ async fn fetch_event(client: &BuzzClient, event_id: &str) -> Result<serde_json::
         .ok_or_else(|| CliError::NotFound(format!("event {event_id} not found")))
 }
 
-async fn resolve_thread_ref(
+pub(crate) async fn resolve_thread_ref(
     client: &BuzzClient,
     parent_event_id: &str,
 ) -> Result<ThreadRef, CliError> {
@@ -83,7 +86,10 @@ async fn resolve_thread_ref(
     thread_ref_from_event(parent_event_id, &event)
 }
 
-fn thread_ref_from_event(event_id: &str, event: &serde_json::Value) -> Result<ThreadRef, CliError> {
+pub(crate) fn thread_ref_from_event(
+    event_id: &str,
+    event: &serde_json::Value,
+) -> Result<ThreadRef, CliError> {
     let parent_eid = parse_event_id(event_id)?;
     let tags = event
         .get("tags")
