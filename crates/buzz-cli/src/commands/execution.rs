@@ -1,8 +1,6 @@
 use std::time::{Duration, Instant};
 
 use crate::error::CliError;
-use serde_json::json;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 /// Result from a child execution (dev or tester).
 #[derive(Debug, Clone)]
@@ -178,30 +176,71 @@ pub async fn execute_children(
     })
 }
 
-/// Run a single child process with the given role.
+/// Default persona file path for a role, relative to the repo root. Overridable
+/// via `BUZZ_DEV_PERSONA_PATH` / `BUZZ_TESTER_PERSONA_PATH` for deployments that
+/// don't ship `examples/` alongside the binary.
+fn persona_path_for_role(role: &str) -> String {
+    let (env_var, default_path) = match role {
+        "dev" => (
+            "BUZZ_DEV_PERSONA_PATH",
+            "examples/meadow-core/agents/dev.persona.md",
+        ),
+        _ => (
+            "BUZZ_TESTER_PERSONA_PATH",
+            "examples/meadow-core/agents/tester.persona.md",
+        ),
+    };
+    std::env::var(env_var).unwrap_or_else(|_| default_path.to_string())
+}
+
+/// Builds the task prompt handed to a child via `buzz-acp run-task --prompt`.
 ///
-/// Spawns a buzz-agent subprocess with the specified persona and tool scope.
-/// The agent runs with a shared timeout budget and reports back via console output.
+/// The persona (system prompt) tells the agent *how* to behave; this text tells
+/// it *what* to do right now — point it at the confirmed decision thread via the
+/// `buzz` CLI (which the agent has shell access to via `buzz-dev-mcp`) so it pulls
+/// full context itself rather than us pre-summarizing it here.
+fn task_prompt_for_role(role: &str, channel_id: &str, thread_id: &str) -> String {
+    let fetch_cmd =
+        format!("buzz --format compact messages thread --channel {channel_id} --event {thread_id}");
+    match role {
+        "dev" => format!(
+            "A decision was confirmed in this Buzz thread. Run `{fetch_cmd}` to read the \
+             full discussion and the confirmed scope/acceptance criteria. Implement the \
+             confirmed decision: read the existing codebase, write the code, commit, and \
+             open a pull request. Do not merge or deploy. Post progress updates to the \
+             thread as you go (channel {channel_id}, thread {thread_id})."
+        ),
+        _ => format!(
+            "A decision was confirmed and implemented in this Buzz thread. Run `{fetch_cmd}` \
+             to read the full discussion, the confirmed acceptance criteria, and the \
+             developer's progress updates (including any PR link). Verify the implementation: \
+             run the real test suite and check each acceptance criterion against actual \
+             output. Do not modify any code. Post your pass/fail report to the thread \
+             (channel {channel_id}, thread {thread_id})."
+        ),
+    }
+}
+
+/// Run a single child by spawning `buzz-acp run-task` — a real one-shot agent
+/// execution (see `crates/buzz-acp`'s `run-task` subcommand), not a simulated
+/// or placeholder subprocess.
 ///
 /// # Design (Phase 4, increment 3)
 ///
-/// - Spawns real OS subprocess via `tokio::process::Command`
-/// - Communicates via ACP (JSON-RPC protocol over stdin/stdout)
-/// - Dev role: full shell/file access via buzz-dev-mcp
-/// - Tester role: read/execute-only access (mirrors buzziro-tester restrictions)
-/// - Returns ChildResult with process exit status and captured output
-/// - On timeout: terminates subprocess and reports failure
-///
-/// # External Dependencies (not tested without live infrastructure)
-///
-/// Full end-to-end execution requires:
-/// - A running Buzz relay instance
-/// - LLM credentials (configured in agent subprocess environment)
-/// - buzz-agent binary accessible in PATH (or via `sprig` dispatcher)
+/// - Spawns real `buzz-acp run-task`, which spawns a real LLM-backed agent,
+///   runs one real ACP turn, and exits 0/1/2 based on the real outcome.
+/// - Dev role: `--tool-scope full`. Tester role: `--tool-scope read-only`.
+///   NOTE: `run-task`'s tool-scope flag is currently a documented placeholder
+///   (`buzz-dev-mcp` has no tool-gating mechanism yet, tracked under Phase 3.5)
+///   — both roles currently run with the same (bypass) permission mode. This
+///   is a real, known gap, not hidden: don't rely on this for isolation yet.
+/// - ISM credentials (`BUZZ_ISM_*`) are never forwarded to either child.
+/// - One overall shared deadline; a child that can't start before the deadline
+///   is reported as timed out rather than spawned.
 async fn run_child(
     role: &str,
     thread_id: &str,
-    _channel_id: &str,
+    channel_id: &str,
     deadline: Instant,
 ) -> Result<ChildResult, String> {
     let start = Instant::now();
@@ -219,156 +258,101 @@ async fn run_child(
         });
     }
 
-    // Determine tool scope based on role
     let tool_scope = match role {
-        "dev" => "shell,file",   // Full read/write access
-        "tester" => "read_only", // Read/execute only (verify discipline)
-        _ => "read_only",
+        "dev" => "full",
+        _ => "read-only",
     };
 
-    // Spawn buzz-agent subprocess with ACP protocol support
-    // The agent is configured with a persona (dev.persona.md or tester.persona.md)
-    // from examples/meadow-core/agents/
-    let mut agent_cmd = tokio::process::Command::new("sprig");
+    let persona_path = persona_path_for_role(role);
+    let system_prompt = std::fs::read_to_string(&persona_path)
+        .map_err(|e| format!("failed to read persona file {}: {}", persona_path, e))?;
+    let task_prompt = task_prompt_for_role(role, channel_id, thread_id);
 
-    // Use buzz-agent via sprig dispatcher
-    agent_cmd.arg("--help"); // ponytail: placeholder invocation; real impl needs ACP init message flow
-
+    let mut agent_cmd = tokio::process::Command::new("buzz-acp");
     agent_cmd
-        .env("BUZZ_ROLE", role)
-        .env("BUZZ_TOOL_SCOPE", tool_scope)
-        .env("BUZZ_THREAD_ID", thread_id)
-        // ISM credentials are intentionally NOT passed to children (Supervisor-only access)
-        .stdin(std::process::Stdio::piped())
+        .arg("run-task")
+        .arg("--prompt")
+        .arg(&task_prompt)
+        .arg("--system-prompt")
+        .arg(&system_prompt)
+        .arg("--tool-scope")
+        .arg(tool_scope)
+        .arg("--timeout-secs")
+        .arg(remaining.as_secs().to_string())
+        // ISM credentials are intentionally NOT set here — Supervisor-only access.
+        // BUZZ_PRIVATE_KEY (required by `run-task`) is inherited from this
+        // process's own environment, same as buzz-cli's own signing key.
+        .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
 
-    // Spawn the process
     let mut child = agent_cmd
         .spawn()
-        .map_err(|e| format!("failed to spawn agent subprocess: {}", e))?;
+        .map_err(|e| format!("failed to spawn buzz-acp run-task: {}", e))?;
 
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "failed to open stdin".to_string())?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| "failed to open stdout".to_string())?;
-    let stderr = child
-        .stderr
-        .take()
-        .ok_or_else(|| "failed to open stderr".to_string())?;
-
-    let mut stdout_reader = BufReader::new(stdout);
-    let mut stderr_reader = BufReader::new(stderr);
-
-    // Send initial ACP initialize message
-    // Real flow: Initialize → SessionNew → SessionPrompt → collect responses
-    // This is a simplified version that sends a placeholder task prompt
-    let init_msg = json!({
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {
-            "protocol_version": 1
-        }
+    // Take the pipes before waiting so a timeout can still kill the process
+    // without losing the `Child` handle to `wait_with_output()`.
+    let mut stdout_pipe = child.stdout.take().ok_or("failed to open stdout pipe")?;
+    let mut stderr_pipe = child.stderr.take().ok_or("failed to open stderr pipe")?;
+    let stdout_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let _ = tokio::io::AsyncReadExt::read_to_string(&mut stdout_pipe, &mut buf).await;
+        buf
+    });
+    let stderr_task = tokio::spawn(async move {
+        let mut buf = String::new();
+        let _ = tokio::io::AsyncReadExt::read_to_string(&mut stderr_pipe, &mut buf).await;
+        buf
     });
 
-    if let Err(e) = stdin.write_all(format!("{}\n", init_msg).as_bytes()).await {
-        return Ok(ChildResult {
-            role: role.to_string(),
-            success: false,
-            output: String::new(),
-            error: Some(format!("failed to initialize agent: {}", e)),
-            duration_secs: start.elapsed().as_secs_f64(),
-        });
-    }
-
-    // Wait for process completion or timeout
-    // ponytail: simplified; real impl would parse ACP messages and manage bidirectional protocol
-    let timeout_duration = remaining;
-
-    let mut output = String::new();
-    let mut errors = String::new();
-
-    // Try to read any output (non-blocking attempt)
-    let _ = tokio::time::timeout(Duration::from_millis(100), async {
-        let mut line = String::new();
-        while let Ok(n) = stdout_reader.read_line(&mut line).await {
-            if n == 0 {
-                break;
-            }
-            output.push_str(&line);
-            line.clear();
-        }
-    })
-    .await;
-
-    // Try to read any errors (non-blocking attempt)
-    let _ = tokio::time::timeout(Duration::from_millis(100), async {
-        let mut line = String::new();
-        while let Ok(n) = stderr_reader.read_line(&mut line).await {
-            if n == 0 {
-                break;
-            }
-            errors.push_str(&line);
-            line.clear();
-        }
-    })
-    .await;
-
-    // Wait for child completion
-    let child_result = tokio::time::timeout(timeout_duration, child.wait()).await;
-    match child_result {
-        Ok(Ok(exit_status)) => {
-            let success = exit_status.success();
-            let error_msg = if !success {
-                if !errors.is_empty() {
-                    Some(format!("agent failed: {}", errors))
-                } else {
-                    Some(format!(
-                        "agent exited with code: {}",
-                        exit_status.code().unwrap_or(-1)
-                    ))
-                }
-            } else {
-                None
-            };
-
+    match tokio::time::timeout(remaining, child.wait()).await {
+        Ok(Ok(status)) => {
+            let stdout = stdout_task.await.unwrap_or_default();
+            let stderr = stderr_task.await.unwrap_or_default();
+            let success = status.success();
             Ok(ChildResult {
                 role: role.to_string(),
                 success,
-                output: if !output.is_empty() {
-                    output
+                output: if !stdout.is_empty() {
+                    stdout
                 } else {
-                    format!(
-                        "Agent '{}' completed successfully (no output captured)",
-                        role
-                    )
+                    stderr.clone()
                 },
-                error: error_msg,
+                error: if success {
+                    None
+                } else if !stderr.is_empty() {
+                    Some(stderr)
+                } else {
+                    Some(format!(
+                        "run-task exited with code {}",
+                        status.code().unwrap_or(-1)
+                    ))
+                },
                 duration_secs: start.elapsed().as_secs_f64(),
             })
         }
-        Ok(Err(e)) => Ok(ChildResult {
-            role: role.to_string(),
-            success: false,
-            output: String::new(),
-            error: Some(format!("failed to wait for agent: {}", e)),
-            duration_secs: start.elapsed().as_secs_f64(),
-        }),
+        Ok(Err(e)) => {
+            stdout_task.abort();
+            stderr_task.abort();
+            Ok(ChildResult {
+                role: role.to_string(),
+                success: false,
+                output: String::new(),
+                error: Some(format!("failed to wait for run-task: {}", e)),
+                duration_secs: start.elapsed().as_secs_f64(),
+            })
+        }
         Err(_timeout) => {
-            // Timeout occurred
             let _ = child.kill().await;
+            stdout_task.abort();
+            stderr_task.abort();
             Ok(ChildResult {
                 role: role.to_string(),
                 success: false,
                 output: String::new(),
                 error: Some(format!(
-                    "agent execution timeout after {:.1}s",
-                    timeout_duration.as_secs_f64()
+                    "run-task timed out after {:.1}s",
+                    remaining.as_secs_f64()
                 )),
                 duration_secs: start.elapsed().as_secs_f64(),
             })
