@@ -1,4 +1,5 @@
 use crate::client::BuzzClient;
+use crate::commands::execution;
 use crate::decision_gate::{self, DecisionState};
 use crate::error::CliError;
 use crate::validate::parse_event_id;
@@ -153,8 +154,23 @@ async fn cmd_confirm(
 
 /// Execute the `supervise execute` subcommand.
 ///
-/// Transitions the decision to "executing" state and posts a placeholder message.
-/// (Full execution with dev+test fan-out is Phase 4, increment 3.)
+/// Spawns two child processes (developer and tester roles) concurrently,
+/// waits for both to complete, and posts a consolidated result message.
+/// The execution has a default timeout of 5 minutes per overall budget.
+///
+/// # Design (Phase 4, increment 3)
+///
+/// - **Fan-out**: exactly 2 children per execution — developer (implements) and
+///   tester (verifies), mirroring the proven ISM Sonnet→Andy→Rose pattern.
+/// - **Consolidation**: exactly one reply per execution, posted only once both
+///   children finish.
+/// - **Authority**: default is actual implementation (write code, commit, open PR)
+///   — not analysis-only. Deploy/merge is always a separate, explicitly
+///   requested action.
+/// - **Failure handling**: fan-out capped at one level (children cannot spawn
+///   their own children). One overall timeout/budget; on breach, post status
+///   update rather than going silent. Child quiet past its own bound is treated
+///   as failed and reported honestly.
 async fn cmd_execute(client: &BuzzClient, channel: String, thread: String) -> Result<(), CliError> {
     // Parse and validate inputs
     let channel_uuid = crate::validate::parse_uuid(&channel)
@@ -167,12 +183,12 @@ async fn cmd_execute(client: &BuzzClient, channel: String, thread: String) -> Re
         .await
         .map_err(|e| CliError::Other(format!("failed to resolve thread: {}", e)))?;
 
-    // Post execution message
-    let content = "Executing — implementation coming in increment 3.";
+    // Post initial "executing" status message
+    let initial_content = "Executing decision with developer and tester fan-out...";
 
-    let builder = buzz_sdk::build_message(
+    let initial_builder = buzz_sdk::build_message(
         channel_uuid,
-        content,
+        initial_content,
         Some(&thread_ref),
         &[],
         false,
@@ -181,27 +197,56 @@ async fn cmd_execute(client: &BuzzClient, channel: String, thread: String) -> Re
     )
     .map_err(|e| CliError::Other(format!("failed to build execution message: {}", e)))?;
 
-    // Add decision_state tag
-    let builder = decision_gate::add_decision_state_tag(builder, DecisionState::Executing)?;
+    let initial_builder =
+        decision_gate::add_decision_state_tag(initial_builder, DecisionState::Executing)?;
+    let initial_builder = super::with_git_provenance(initial_builder)?;
 
-    // Apply git provenance
-    let builder = super::with_git_provenance(builder)?;
-
-    // Sign and publish
-    let event = client
-        .sign_event(builder)
+    let initial_event = client
+        .sign_event(initial_builder)
         .map_err(|e| CliError::Other(format!("failed to sign event: {}", e)))?;
 
-    let raw = client
-        .submit_event(event)
+    let _initial_raw = client
+        .submit_event(initial_event)
         .await
         .map_err(|e| CliError::Other(format!("failed to submit execution message: {}", e)))?;
 
-    let output = crate::client::normalize_write_response(&raw);
-    println!("{output}");
-
     // Log to audit trail
     let _audit_result = log_decision_transition(&thread, DecisionState::Executing).await;
+
+    // Execute the dev and tester children with a 5-minute overall timeout budget
+    let execution_result = execution::execute_children(&thread, &channel, 300).await?;
+
+    // Build consolidated result message
+    let result_content = execution_result.as_message();
+
+    let result_builder = buzz_sdk::build_message(
+        channel_uuid,
+        &result_content,
+        Some(&thread_ref),
+        &[],
+        false,
+        &[],
+        &[],
+    )
+    .map_err(|e| CliError::Other(format!("failed to build result message: {}", e)))?;
+
+    // Tag with executing state (final state reports back with success/failure in content)
+    let result_builder =
+        decision_gate::add_decision_state_tag(result_builder, DecisionState::Executing)?;
+    let result_builder = super::with_git_provenance(result_builder)?;
+
+    // Sign and publish result
+    let result_event = client
+        .sign_event(result_builder)
+        .map_err(|e| CliError::Other(format!("failed to sign result event: {}", e)))?;
+
+    let result_raw = client
+        .submit_event(result_event)
+        .await
+        .map_err(|e| CliError::Other(format!("failed to submit result message: {}", e)))?;
+
+    let output = crate::client::normalize_write_response(&result_raw);
+    println!("{output}");
 
     Ok(())
 }
