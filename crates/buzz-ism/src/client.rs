@@ -166,6 +166,62 @@ impl IsmClient {
         let attachments: Vec<Attachment> = response.json().await?;
         Ok(attachments)
     }
+
+    /// Post a comment on an issue.
+    pub async fn post_comment(&self, issue_id: &str, body: &str) -> Result<String> {
+        let token = self.get_token().await?;
+        let url = format!("{}/api/v1/issues/{}/comments", self.base_url, issue_id);
+        let payload = serde_json::json!({ "body": body });
+
+        let response = self
+            .http_client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(IsmError::ApiError(format!("status {}: {}", status, text)));
+        }
+
+        let comment: Comment = response.json().await?;
+        Ok(comment.id)
+    }
+
+    /// Create a new issue.
+    pub async fn create_issue(
+        &self,
+        title: &str,
+        description: Option<&str>,
+    ) -> Result<String> {
+        let token = self.get_token().await?;
+        let url = format!("{}/api/v1/issues", self.base_url);
+
+        let mut payload = serde_json::json!({ "title": title });
+        if let Some(desc) = description {
+            payload["description"] = serde_json::json!(desc);
+        }
+
+        let response = self
+            .http_client
+            .post(&url)
+            .bearer_auth(&token)
+            .json(&payload)
+            .send()
+            .await?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(IsmError::ApiError(format!("status {}: {}", status, text)));
+        }
+
+        let issue: Issue = response.json().await?;
+        Ok(issue.id)
+    }
 }
 
 #[cfg(test)]

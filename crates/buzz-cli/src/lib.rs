@@ -1,4 +1,5 @@
 pub mod agent_management;
+pub mod decision_gate;
 mod client;
 mod commands;
 mod error;
@@ -282,6 +283,9 @@ enum Cmd {
     /// Community moderation — reports queue, bans, timeouts, audit trail
     #[command(subcommand)]
     Moderation(ModerationCmd),
+    /// Decision-gating for Supervisor-led work
+    #[command(subcommand)]
+    Supervise(SuperviseCmd),
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -2101,6 +2105,53 @@ pub enum ModerationCmd {
     },
 }
 
+#[derive(Subcommand)]
+pub enum SuperviseCmd {
+    /// Draft a decision proposal in response to a Supervisor mention.
+    ///
+    /// Posts a summary with scope, acceptance criteria, and links.
+    /// Marks the thread as in the "drafted" state.
+    Draft {
+        /// Channel UUID (from 'buzz channels list')
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex) — the message that @mentioned Supervisor
+        #[arg(long)]
+        thread: String,
+        /// Proposal summary (Markdown; use '-' to read from stdin)
+        #[arg(long)]
+        summary: String,
+    },
+    /// Confirm a drafted decision and transition to execution.
+    ///
+    /// After reviewing the drafted summary, the lead confirms it and
+    /// optionally provides new/updated details. Marks the thread as
+    /// "confirmed" and syncs state back to ISM if linked.
+    Confirm {
+        /// Channel UUID
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex)
+        #[arg(long)]
+        thread: String,
+        /// Confirmation message (optional; if provided, replaces the summary)
+        #[arg(long)]
+        summary: Option<String>,
+    },
+    /// Begin execution of a confirmed decision.
+    ///
+    /// Transitions the thread to "executing" state and coordinates
+    /// work (details implemented in Phase 4, increment 3).
+    Execute {
+        /// Channel UUID
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex)
+        #[arg(long)]
+        thread: String,
+    },
+}
+
 /// Normalize hand-authored `BUZZ_AUTH_TAG` input to strict JSON.
 ///
 /// `.env` files and shell exports sometimes carry the tag in the unquoted
@@ -2208,6 +2259,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Upload(sub) => commands::upload::dispatch(sub, &client).await,
         Cmd::Mem(sub) => commands::mem::dispatch(sub, &client).await,
         Cmd::Moderation(sub) => commands::moderation::dispatch(sub, &client, &cli.format).await,
+        Cmd::Supervise(sub) => commands::supervise::dispatch(sub, &client).await,
         Cmd::Pack(_) => unreachable!("handled above"),
     }
 }
