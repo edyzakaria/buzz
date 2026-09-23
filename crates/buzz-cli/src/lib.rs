@@ -1,6 +1,7 @@
 pub mod agent_management;
 mod client;
 mod commands;
+pub mod decision_gate;
 mod error;
 mod help_tree;
 mod links;
@@ -234,6 +235,9 @@ enum Cmd {
     /// List, open, and manage direct messages
     #[command(subcommand)]
     Dms(DmsCmd),
+    /// Fetch an ISM ticket and discuss it in a channel
+    #[command(subcommand)]
+    Discuss(DiscussCmd),
     /// Look up users and manage profiles and presence
     #[command(subcommand)]
     Users(UsersCmd),
@@ -279,6 +283,9 @@ enum Cmd {
     /// Community moderation — reports queue, bans, timeouts, audit trail
     #[command(subcommand)]
     Moderation(ModerationCmd),
+    /// Decision-gating for Supervisor-led work
+    #[command(subcommand)]
+    Supervise(SuperviseCmd),
 }
 
 #[derive(Clone, Copy, clap::ValueEnum)]
@@ -898,6 +905,18 @@ pub enum DmsCmd {
         /// DM conversation UUID
         #[arg(long)]
         channel: String,
+    },
+}
+
+#[derive(Subcommand)]
+pub enum DiscussCmd {
+    /// Fetch an ISM ticket and post its summary to a channel
+    Thread {
+        /// ISM issue ID (e.g., ISM-123)
+        issue_id: String,
+        /// Channel ID (UUID) to post the discussion into
+        #[arg(long)]
+        channel: Option<String>,
     },
 }
 
@@ -2086,6 +2105,53 @@ pub enum ModerationCmd {
     },
 }
 
+#[derive(Subcommand)]
+pub enum SuperviseCmd {
+    /// Draft a decision proposal in response to a Supervisor mention.
+    ///
+    /// Posts a summary with scope, acceptance criteria, and links.
+    /// Marks the thread as in the "drafted" state.
+    Draft {
+        /// Channel UUID (from 'buzz channels list')
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex) — the message that @mentioned Supervisor
+        #[arg(long)]
+        thread: String,
+        /// Proposal summary (Markdown; use '-' to read from stdin)
+        #[arg(long)]
+        summary: String,
+    },
+    /// Confirm a drafted decision and transition to execution.
+    ///
+    /// After reviewing the drafted summary, the lead confirms it and
+    /// optionally provides new/updated details. Marks the thread as
+    /// "confirmed" and syncs state back to ISM if linked.
+    Confirm {
+        /// Channel UUID
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex)
+        #[arg(long)]
+        thread: String,
+        /// Confirmation message (optional; if provided, replaces the summary)
+        #[arg(long)]
+        summary: Option<String>,
+    },
+    /// Begin execution of a confirmed decision.
+    ///
+    /// Transitions the thread to "executing" state and coordinates
+    /// work (details implemented in Phase 4, increment 3).
+    Execute {
+        /// Channel UUID
+        #[arg(long)]
+        channel: String,
+        /// Thread root event ID (hex)
+        #[arg(long)]
+        thread: String,
+    },
+}
+
 /// Normalize hand-authored `BUZZ_AUTH_TAG` input to strict JSON.
 ///
 /// `.env` files and shell exports sometimes carry the tag in the unquoted
@@ -2178,6 +2244,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Emoji(sub) => commands::emoji::dispatch(sub, &client).await,
         Cmd::Gifs(sub) => commands::gifs::dispatch(sub, &client).await,
         Cmd::Dms(sub) => commands::dms::dispatch(sub, &client).await,
+        Cmd::Discuss(sub) => commands::discuss::dispatch(sub, &client).await,
         Cmd::Users(sub) => commands::users::dispatch(sub, &client, &cli.format).await,
         Cmd::Workflows(sub) => commands::workflows::dispatch(sub, &client).await,
         Cmd::Feed(sub) => commands::feed::dispatch(sub, &client, &cli.format).await,
@@ -2192,6 +2259,7 @@ async fn run(cli: Cli) -> Result<(), CliError> {
         Cmd::Upload(sub) => commands::upload::dispatch(sub, &client).await,
         Cmd::Mem(sub) => commands::mem::dispatch(sub, &client).await,
         Cmd::Moderation(sub) => commands::moderation::dispatch(sub, &client, &cli.format).await,
+        Cmd::Supervise(sub) => commands::supervise::dispatch(sub, &client).await,
         Cmd::Pack(_) => unreachable!("handled above"),
     }
 }
@@ -2323,6 +2391,7 @@ mod tests {
             "agents",
             "canvas",
             "channels",
+            "discuss",
             "dms",
             "emoji",
             "feed",
@@ -2340,6 +2409,7 @@ mod tests {
             "reactions",
             "repos",
             "social",
+            "supervise",
             "upload",
             "users",
             "workflows",

@@ -1035,6 +1035,7 @@ dependencies = [
  "axum",
  "base64 0.22.1",
  "buzz-core",
+ "buzz-ism",
  "buzz-persona",
  "buzz-sdk",
  "buzz-ws-client",
@@ -1179,6 +1180,21 @@ dependencies = [
  "tracing-subscriber",
  "windows-sys 0.61.2",
  "zeroize",
+]
+
+[[package]]
+name = "buzz-ism"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "moka",
+ "reqwest 0.13.4",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

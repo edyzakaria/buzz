@@ -1,8 +1,10 @@
 pub mod agents;
 pub mod channel_templates;
 pub mod channels;
+pub mod discuss;
 pub mod dms;
 pub mod emoji;
+pub mod execution;
 pub mod feed;
 pub mod gifs;
 pub mod issues;
@@ -19,6 +21,7 @@ pub mod reactions;
 mod repo_default_branch;
 pub mod repos;
 pub mod social;
+pub mod supervise;
 pub mod upload;
 pub mod users;
 pub mod workflows;

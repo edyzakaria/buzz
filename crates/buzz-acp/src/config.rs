@@ -237,6 +237,68 @@ pub struct AuthenticateArgs {
     pub method_id: String,
 }
 
+/// CLI args for `buzz-acp run-task` — one-shot task execution without relay subscription.
+#[derive(Debug, Parser)]
+#[command(
+    name = "buzz-acp run-task",
+    about = "Execute a single task without relay subscription"
+)]
+pub struct RunTaskArgs {
+    /// Agent binary to spawn (e.g. "goose", "claude-agent-acp", "codex-acp").
+    #[arg(long, env = "BUZZ_ACP_AGENT_COMMAND", default_value = "goose")]
+    pub agent_command: String,
+
+    /// Arguments passed to the agent binary.
+    #[arg(
+        long,
+        env = "BUZZ_ACP_AGENT_ARGS",
+        default_value = "acp",
+        value_delimiter = ','
+    )]
+    pub agent_args: Vec<String>,
+
+    /// Agent private key (64-char hex, Nostr format).
+    #[arg(long, env = "BUZZ_PRIVATE_KEY", hide_env_values = true)]
+    pub private_key: String,
+
+    /// MCP command to spawn (e.g. "buzz-dev-mcp"). Leave empty to skip.
+    #[arg(long, env = "BUZZ_ACP_MCP_COMMAND", default_value = "")]
+    pub mcp_command: String,
+
+    /// Path to persona file for context (optional).
+    #[arg(long)]
+    pub persona: Option<String>,
+
+    /// Task prompt text (mutually exclusive with --prompt-file).
+    #[arg(long, env = "BUZZ_ACP_TASK_PROMPT", conflicts_with = "prompt_file")]
+    pub prompt: Option<String>,
+
+    /// Read task prompt from file (mutually exclusive with --prompt).
+    #[arg(long, conflicts_with = "prompt")]
+    pub prompt_file: Option<std::path::PathBuf>,
+
+    /// Tool scope: "full" (all tools) or "read-only" (read/verify only).
+    /// Currently a placeholder; tool-gating is not yet implemented.
+    #[arg(long, default_value = "full")]
+    pub tool_scope: String,
+
+    /// Timeout in seconds for the task execution.
+    #[arg(long, default_value_t = 300)]
+    pub timeout_secs: u64,
+
+    /// Idle timeout: max seconds of silence before killing the turn.
+    #[arg(long, default_value_t = 1500)]
+    pub idle_timeout: u64,
+
+    /// Absolute wall-clock cap per turn (seconds).
+    #[arg(long, default_value_t = 3600)]
+    pub max_turn_duration: u64,
+
+    /// System prompt (optional).
+    #[arg(long)]
+    pub system_prompt: Option<String>,
+}
+
 #[derive(Debug, Parser)]
 #[command(
     name = "buzz-acp",
