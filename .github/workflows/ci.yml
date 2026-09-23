@@ -3,6 +3,12 @@ on:
   push:
     branches: [main, release]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      run_desktop_e2e:
+        description: 'Force the full Desktop/E2E suite (Tauri build + Playwright) to run, even for backend-only changes'
+        type: boolean
+        default: false
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
@@ -161,7 +167,14 @@ jobs:
   desktop-domain:
     name: Desktop Domain
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    # NOTE: intentionally does NOT trigger on a bare backend `rust` change —
+    # only on desktop-facing changes, a push to main/release, or an explicit
+    # manual request (`gh workflow run ci.yml -f run_desktop_e2e=true`).
+    # This is a real, accepted trade-off: a workspace-wide dependency bump in
+    # crates/** could in principle still break the desktop Tauri build without
+    # this catching it pre-merge. Run it manually before merging any PR that
+    # touches shared dependencies you're unsure about.
+    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_desktop_e2e == 'true')
     uses: ./.github/workflows/_ci-desktop.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
@@ -193,7 +206,8 @@ jobs:
   desktop-macos-domain:
     name: Desktop macOS Domain
     needs: [changes]
-    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || needs.changes.outputs.rust == 'true'
+    # Same intentional trade-off as desktop-domain above — see its comment.
+    if: github.event_name == 'push' || needs.changes.outputs.desktop == 'true' || needs.changes.outputs.desktop-rust == 'true' || (github.event_name == 'workflow_dispatch' && github.event.inputs.run_desktop_e2e == 'true')
     uses: ./.github/workflows/_ci-desktop-macos.yml
     with:
       rust: ${{ needs.changes.outputs.rust == 'true' }}
