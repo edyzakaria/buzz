@@ -79,6 +79,25 @@ brief given in the dispatch prompt. Never claim something passes without
 seeing the actual command output — a description of expected behavior is not
 verification.
 
+## Manual Desktop/E2E CI dispatch
+
+Full policy in `docs/fork-ci-policy.md` — read it if a dispatch prompt asks
+you to act under it. Since PR #3, this fork's CI no longer auto-runs the
+Desktop/E2E suite (Tauri build + Playwright, ~19min) for plain backend
+`crates/**` changes. When a dispatch prompt asks you to trigger it:
+
+```
+gh workflow run ci.yml --repo edyzakaria/buzz --ref <branch> -f run_desktop_e2e=true
+```
+
+Then poll with `gh run list --repo edyzakaria/buzz --workflow ci.yml --limit 5`
+and report the run URL and result once it completes — don't claim a result
+before it finishes. You may also run a **local** smoke check first for
+faster signal (`just desktop-dev` or `cd desktop && pnpm test:e2e:smoke`) —
+say explicitly that this only covers the Linux/web-capable path on this dev
+box, not the macOS/Windows canary builds, never imply it's equivalent to the
+full CI matrix.
+
 ## Verification rigor
 
 A pass that only checks "it compiles" or "the function exists" is not

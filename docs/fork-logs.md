@@ -4,6 +4,17 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-23 — **CI policy: manual Desktop/E2E trigger, agent-judged.**
+  Following PR #3 (auto-trigger removed for backend-only changes), wrote
+  `docs/fork-ci-policy.md`: the assisting agent now makes and states the
+  "does this change plausibly affect desktop" judgment explicitly on every
+  `crates/**`/`Cargo.toml`/`Cargo.lock` change, rather than leaving it to
+  GitHub's path-filter alone. If the call is "run it," dispatch
+  `buzziro-tester` to fire `gh workflow run ci.yml -f run_desktop_e2e=true`
+  and report the real result — never silently skip the judgment, never
+  claim a result before the run finishes. Wired the same into
+  `buzziro-tester`'s own agent definition so it doesn't require re-explaining
+  per dispatch.
 - 2026-09-23 — **Phase 4 built and merged (PR #2, `90cb3c6b`).** ISM-bridged
   Supervisor execution moved from planning-only to real, working code:
   `buzz-ism` client + `buzz discuss thread` (pulls ISM tickets into a channel
