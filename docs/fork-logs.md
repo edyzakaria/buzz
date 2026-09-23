@@ -4,6 +4,19 @@ Decisions, changes, and notes worth keeping. One entry per item, newest first.
 
 ---
 
+- 2026-09-23 — **PR #3 merged (`d9cda98a`).** Includes a second commit
+  (`e9d4432d`) beyond the original manual-trigger change: found and fixed a
+  real, pre-existing bug in the `desktop:` path-filter itself — a standalone
+  negation pattern (`'!desktop/src-tauri/**'`) matched independently under
+  `predicate-quantifier: some`, so `outputs.desktop` was `true` for nearly
+  any changed file repo-wide (confirmed via the actual paths-filter step log
+  on PR #3's own first run: `.github/workflows/ci.yml` alone matched
+  `desktop`). This had been silently defeating the intended narrowing the
+  whole time, predating this PR. Fixed by dropping the exclusion (verified
+  no consumer depended on it). Not yet empirically re-verified with a fresh
+  PR touching only non-desktop files — the mechanism and fix are confirmed
+  by reading the log and the filter logic, but a live confirming run is
+  still outstanding.
 - 2026-09-23 — **CI policy: manual Desktop/E2E trigger, agent-judged.**
   Following PR #3 (auto-trigger removed for backend-only changes), wrote
   `docs/fork-ci-policy.md`: the assisting agent now makes and states the
