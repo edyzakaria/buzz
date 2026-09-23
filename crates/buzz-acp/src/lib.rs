@@ -2494,7 +2494,10 @@ async fn run_run_task(args: RunTaskArgs) -> Result<()> {
                 name: "dev".to_string(),
                 command: args.mcp_command.clone(),
                 args: vec![],
-                env: vec![],
+                env: vec![crate::acp::EnvVar {
+                    name: "BUZZ_DEV_MCP_TOOL_SCOPE".to_string(),
+                    value: args.tool_scope.clone(),
+                }],
             }]
         },
         initial_message: None,
