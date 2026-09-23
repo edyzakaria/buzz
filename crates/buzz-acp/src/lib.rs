@@ -34,7 +34,7 @@ use buzz_core::observer::{
 use clap::Parser;
 use config::{
     AuthAgentArgs, AuthMethodsArgs, AuthenticateArgs, Config, DedupMode, ModelsArgs,
-    MultipleEventHandling, RespondTo, SubscribeMode,
+    MultipleEventHandling, RespondTo, RunTaskArgs, SubscribeMode,
 };
 use filter::SubscriptionRule;
 use futures_util::FutureExt;
@@ -2444,6 +2444,177 @@ mod replay_floor_tests {
     }
 }
 
+/// Execute a single task via one spawned agent without relay subscription.
+/// Accepts a prompt and timeout, prints agent output to stdout, exits on completion or timeout.
+async fn run_run_task(args: RunTaskArgs) -> Result<()> {
+    // Read prompt from --prompt or --prompt-file
+    let prompt = match (&args.prompt, &args.prompt_file) {
+        (Some(p), None) => p.clone(),
+        (None, Some(f)) => std::fs::read_to_string(f)
+            .with_context(|| format!("failed to read prompt file: {}", f.display()))?,
+        (Some(_), Some(_)) => anyhow::bail!("both --prompt and --prompt-file specified"),
+        (None, None) => anyhow::bail!("either --prompt or --prompt-file is required"),
+    };
+
+    // Parse private key
+    let keys = nostr::Keys::parse(&args.private_key).context("failed to parse private key")?;
+
+    // Spawn a single agent
+    let spawn_result = AcpClient::spawn(&args.agent_command, &args.agent_args, &[], false)
+        .await
+        .context("failed to spawn agent")?;
+
+    let mut acp = spawn_result;
+    let agent_index = 0;
+
+    // Initialize the agent
+    let init_timeout = Duration::from_secs(60);
+    let init_result = tokio::time::timeout(init_timeout, acp.initialize())
+        .await
+        .context("agent initialization timed out")?
+        .context("agent initialization failed")?;
+
+    let protocol_version = init_result["protocolVersion"].as_u64().unwrap_or(1) as u32;
+    let agent_name = {
+        let name = init_result
+            .get("agentInfo")
+            .or_else(|| init_result.get("serverInfo"))
+            .and_then(|info| info.get("name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        name.to_string()
+    };
+
+    // Create minimal PromptContext
+    let ctx = Arc::new(PromptContext {
+        mcp_servers: if args.mcp_command.is_empty() {
+            vec![]
+        } else {
+            vec![McpServer {
+                name: "dev".to_string(),
+                command: args.mcp_command.clone(),
+                args: vec![],
+                env: vec![],
+            }]
+        },
+        initial_message: None,
+        idle_timeout: Duration::from_secs(args.idle_timeout),
+        max_turn_duration: Duration::from_secs(args.max_turn_duration),
+        turn_liveness_interval: Duration::ZERO,
+        dedup_mode: DedupMode::Queue,
+        system_prompt: args.system_prompt,
+        session_title: Some(format!("Task ({agent_name})")),
+        team_instructions: None,
+        heartbeat_prompt: None,
+        base_prompt: Some("You are an AI assistant. Help the user with their task.".to_string()),
+        cwd: current_working_directory()?,
+        rest_client: relay::RestClient {
+            http: reqwest::Client::new(),
+            base_url: "http://localhost".to_string(),
+            keys: keys.clone(),
+            auth_tag_json: None,
+        },
+        channel_info: pool::ChannelInfoResolver::new(
+            HashMap::new(),
+            relay::RestClient {
+                http: reqwest::Client::new(),
+                base_url: "http://localhost".to_string(),
+                keys: keys.clone(),
+                auth_tag_json: None,
+            },
+        ),
+        context_message_limit: 0,
+        max_turns_per_session: 0,
+        permission_mode: config::PermissionMode::BypassPermissions,
+        agent_keys: keys.clone(),
+        agent_owner_pubkey: None,
+        memory_enabled: false,
+        harness_name: "buzz-acp-run-task".to_string(),
+        relay_url: "ws://localhost:3000".to_string(),
+    });
+
+    // Create owned agent
+    let owned_agent = OwnedAgent {
+        index: agent_index,
+        acp,
+        state: SessionState::default(),
+        model_capabilities: None,
+        desired_model: None,
+        model_overridden: false,
+        desired_model_request_id: None,
+        desired_model_pending_ack: false,
+        startup_effort: None,
+        agent_name,
+        goose_system_prompt_supported: None,
+        protocol_version,
+    };
+
+    // Set up result channel
+    let (result_tx, mut result_rx) = mpsc::unbounded_channel();
+
+    // Generate a turn ID
+    let turn_id = uuid::Uuid::new_v4().to_string();
+
+    // Spawn the prompt task
+    let task_handle = tokio::spawn(pool::run_prompt_task(
+        owned_agent,
+        None, // no batch/channel context
+        Some(prompt.clone()),
+        ctx.clone(),
+        result_tx,
+        None, // no control signal
+        turn_id,
+    ));
+
+    // Wait for result with timeout
+    let timeout_duration = Duration::from_secs(args.timeout_secs);
+    match tokio::time::timeout(timeout_duration, result_rx.recv()).await {
+        Ok(Some(result)) => {
+            // Task completed
+            match &result.outcome {
+                PromptOutcome::Ok(stop_reason) => {
+                    println!("Task completed successfully. Stop reason: {stop_reason:?}");
+                    std::process::exit(0);
+                }
+                PromptOutcome::Error(e) => {
+                    eprintln!("Task failed with error: {e}");
+                    std::process::exit(1);
+                }
+                PromptOutcome::AgentExited => {
+                    eprintln!("Task failed: agent exited unexpectedly");
+                    std::process::exit(1);
+                }
+                PromptOutcome::Timeout(kind) => {
+                    eprintln!("Task timed out: {kind:?}");
+                    std::process::exit(1);
+                }
+                PromptOutcome::ProjectContextIndeterminate(msg) => {
+                    eprintln!("Task failed: project context indeterminate: {msg}");
+                    std::process::exit(1);
+                }
+                PromptOutcome::Cancelled => {
+                    eprintln!("Task was cancelled");
+                    std::process::exit(1);
+                }
+                PromptOutcome::CancelDrainTimeout(duration) => {
+                    eprintln!("Task cancel timeout after {duration:?}");
+                    std::process::exit(1);
+                }
+            }
+        }
+        Ok(None) => {
+            eprintln!("Task result channel closed unexpectedly");
+            task_handle.abort();
+            std::process::exit(2);
+        }
+        Err(_) => {
+            eprintln!("Task execution timed out after {timeout_duration:?}");
+            task_handle.abort();
+            std::process::exit(2);
+        }
+    }
+}
+
 pub fn run() -> Result<()> {
     config::propagate_legacy_env_vars();
     tokio_main()
@@ -2485,6 +2656,16 @@ async fn tokio_main() -> Result<()> {
             .collect();
         let args = AuthenticateArgs::parse_from(&filtered);
         return run_authenticate(args).await;
+    }
+
+    if is_subcommand("run-task") {
+        let filtered: Vec<String> = std::env::args()
+            .enumerate()
+            .filter(|(i, _)| *i != 1)
+            .map(|(_, a)| a)
+            .collect();
+        let args = RunTaskArgs::parse_from(&filtered);
+        return run_run_task(args).await;
     }
 
     tracing_subscriber::fmt()
